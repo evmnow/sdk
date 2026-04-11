@@ -196,7 +196,6 @@ export interface ContractMetadataConfig {
 
 export interface GetOptions {
   sources?: SourceConfig
-  signal?: AbortSignal
 }
 
 // ── Client ──

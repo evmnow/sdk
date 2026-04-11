@@ -5,12 +5,12 @@ const DEFAULT_REPO_URL =
   'https://raw.githubusercontent.com/evmnow/contract-metadata/refs/heads/main/contracts'
 
 export async function fetchRepository(
-  chainId: number,
+  _chainId: number,
   address: string,
   fetchFn: typeof fetch,
   baseUrl = DEFAULT_REPO_URL,
 ): Promise<Partial<ContractMetadataDocument> | null> {
-  const url = `${baseUrl.replace(/\/$/, '')}/${address.toLowerCase()}.json`
+  const url = `${baseUrl}/${address}.json`
 
   let res: Response
   try {

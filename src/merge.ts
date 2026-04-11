@@ -46,18 +46,18 @@ export async function resolveIncludes(
   const includes = doc.includes
   if (!includes || includes.length === 0) return doc
 
-  const interfaces: Partial<ContractMetadataDocument>[] = []
+  const settled = await Promise.allSettled(
+    includes.map(async (id) => {
+      const url = resolveInterfaceUrl(id, schemaBaseUrl)
+      const res = await fetchFn(url, { signal: AbortSignal.timeout(5_000) })
+      if (res.ok) return res.json() as Promise<Partial<ContractMetadataDocument>>
+      return null
+    }),
+  )
 
-  for (const id of includes) {
-    const url = resolveInterfaceUrl(id, schemaBaseUrl)
-    try {
-      const res = await fetchFn(url)
-      if (res.ok) {
-        interfaces.push(await res.json() as Partial<ContractMetadataDocument>)
-      }
-    } catch {
-      // Skip unresolvable interfaces
-    }
+  const interfaces: Partial<ContractMetadataDocument>[] = []
+  for (const r of settled) {
+    if (r.status === 'fulfilled' && r.value) interfaces.push(r.value)
   }
 
   // Merge interfaces left-to-right, then overlay doc on top
@@ -71,8 +71,7 @@ function resolveInterfaceUrl(id: string, schemaBaseUrl: string): string {
   // Strip optional "interface:" prefix
   const name = id.startsWith('interface:') ? id.slice('interface:'.length) : id
 
-  const base = schemaBaseUrl.replace(/\/$/, '')
-  return `${base}/interfaces/${name}.json`
+  return `${schemaBaseUrl}/interfaces/${name}.json`
 }
 
 function isRecordSection(key: string): key is RecordSection {

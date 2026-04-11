@@ -19,13 +19,11 @@ const DEFAULT_SCHEMA_BASE =
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 
 export function createContractMetadata(config: ContractMetadataConfig): ContractMetadataClient {
-  const {
-    chainId,
-    rpc,
-    repositoryUrl,
-    sourcifyUrl,
-    ipfsGateway,
-  } = config
+  const chainId = config.chainId
+  const rpc = config.rpc
+  const repositoryUrl = config.repositoryUrl?.replace(/\/$/, '')
+  const sourcifyUrl = config.sourcifyUrl?.replace(/\/$/, '')
+  const ipfsGateway = config.ipfsGateway?.replace(/\/$/, '')
   const fetchFn = config.fetch ?? globalThis.fetch
   const defaultSources = config.sources ?? {}
 

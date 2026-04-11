@@ -18,7 +18,7 @@ export async function fetchSourcify(
   fetchFn: typeof fetch,
   baseUrl = DEFAULT_SOURCIFY_URL,
 ): Promise<SourcifyResult | null> {
-  const url = `${baseUrl.replace(/\/$/, '')}/v2/contract/${chainId}/${address}?fields=abi,name,userdoc,devdoc`
+  const url = `${baseUrl}/v2/contract/${chainId}/${address}?fields=abi,name,userdoc,devdoc`
 
   let res: Response
   try {

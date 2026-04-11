@@ -1,5 +1,5 @@
 import type { ContractMetadataDocument } from '../types'
-import { ethCall, encodeContractUriCall, decodeAbiString } from '../rpc'
+import { ethCall, CONTRACT_URI_SELECTOR, decodeAbiString } from '../rpc'
 import { resolveUri } from '../uri'
 
 // ERC-7572 fields that contractURI can provide
@@ -17,7 +17,7 @@ export async function fetchContractURI(
 ): Promise<Partial<ContractMetadataDocument> | null> {
   let result: string
   try {
-    result = await ethCall(rpc, address, encodeContractUriCall(), fetchFn)
+    result = await ethCall(rpc, address, CONTRACT_URI_SELECTOR, fetchFn)
   } catch {
     return null
   }

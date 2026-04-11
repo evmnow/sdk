@@ -4,10 +4,12 @@ import { namehash, dnsEncode } from './ens'
 // ENS Universal Resolver on mainnet
 const UNIVERSAL_RESOLVER = '0xce01f8eee7E479C928F8919abD53E553a36CeF67'
 
-// Function selectors (precomputed)
-const CONTRACT_URI_SELECTOR = '0xe8a3d485'  // contractURI()
-const RESOLVE_SELECTOR = '0x9061b923'        // resolve(bytes,bytes)
-const ADDR_SELECTOR = '0x3b3b57de'           // addr(bytes32)
+// Precomputed function selectors
+export const CONTRACT_URI_SELECTOR = '0xe8a3d485'  // contractURI()
+const RESOLVE_SELECTOR = '0x9061b923'               // resolve(bytes,bytes)
+const ADDR_SELECTOR = '0x3b3b57de'                   // addr(bytes32)
+
+const decoder = new TextDecoder()
 
 export async function ethCall(
   rpc: string,
@@ -39,10 +41,6 @@ export async function ethCall(
   return json.result ?? '0x'
 }
 
-export function encodeContractUriCall(): string {
-  return CONTRACT_URI_SELECTOR
-}
-
 export async function resolveEns(
   rpc: string,
   name: string,
@@ -50,14 +48,8 @@ export async function resolveEns(
 ): Promise<string> {
   const node = namehash(name)
   const dnsName = dnsEncode(name)
-
-  // Encode: resolve(bytes dnsName, bytes addrCalldata)
-  // addrCalldata = addr(bytes32 node)
   const addrCalldata = ADDR_SELECTOR + node.slice(2)
 
-  // ABI encode: resolve(bytes, bytes)
-  // offset of first bytes: 0x40
-  // offset of second bytes: 0x40 + 0x20 + ceil32(dnsName bytes)
   const dnsNameBytes = hexToBytes(dnsName)
   const addrCalldataBytes = hexToBytes('0x' + addrCalldata)
 
@@ -69,11 +61,8 @@ export async function resolveEns(
     throw new ENSResolutionError(name)
   }
 
-  // Result is: bytes memory response, address resolver
-  // Decode the first bytes parameter which contains the ABI-encoded address
   const responseBytes = abiDecodeFirstBytes(result)
 
-  // The response bytes contain an ABI-encoded address (32 bytes, right-padded)
   if (responseBytes.length < 64) {
     throw new ENSResolutionError(name)
   }
@@ -153,6 +142,5 @@ function bytesToHex(bytes: Uint8Array): string {
 }
 
 function hexToUtf8(hex: string): string {
-  const bytes = hexToBytes('0x' + hex)
-  return new TextDecoder().decode(bytes)
+  return decoder.decode(hexToBytes(hex))
 }

@@ -36,9 +36,9 @@ describe('fetchRepository', () => {
       .rejects.toThrow('500')
   })
 
-  it('lowercases the address', async () => {
+  it('uses address as-is (caller is responsible for lowercasing)', async () => {
     const fetchFn = mockFetch({ name: 'Test' })
-    await fetchRepository(chainId, '0xC02AAA39B223FE8D0A0E5C4F27EAD9083C756CC2', fetchFn, 'https://repo.test')
+    await fetchRepository(chainId, address, fetchFn, 'https://repo.test')
 
     expect(fetchFn).toHaveBeenCalledWith(
       `https://repo.test/${address}.json`,

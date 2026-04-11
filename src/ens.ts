@@ -8,11 +8,10 @@ export function namehash(name: string): string {
   if (name === '') return toHex(node)
 
   const labels = name.split('.')
+  const combined = new Uint8Array(64)
   for (let i = labels.length - 1; i >= 0; i--) {
-    const labelHash = keccak_256(encoder.encode(labels[i]))
-    const combined = new Uint8Array(64)
     combined.set(node, 0)
-    combined.set(new Uint8Array(labelHash), 32)
+    combined.set(new Uint8Array(keccak_256(encoder.encode(labels[i]))), 32)
     node = new Uint8Array(keccak_256(combined))
   }
 
