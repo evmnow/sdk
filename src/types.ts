@@ -182,6 +182,7 @@ export interface SourceConfig {
   repository?: boolean
   contractURI?: boolean
   sourcify?: boolean
+  diamond?: boolean
 }
 
 export interface IncludeFields {
@@ -215,11 +216,19 @@ export interface ContractResult {
   natspec?: NatSpec
   sources?: Record<string, string>
   deployedBytecode?: string
+  facets?: FacetInfo[]
 }
 
 export interface NatSpec {
   userdoc?: Record<string, unknown>
   devdoc?: Record<string, unknown>
+}
+
+export interface FacetInfo {
+  address: string
+  selectors: string[]
+  abi?: unknown[]
+  natspec?: NatSpec
 }
 
 // ── Client ──

@@ -78,6 +78,6 @@ function isRecordSection(key: string): key is RecordSection {
   return (RECORD_SECTIONS as readonly string[]).includes(key)
 }
 
-function isRecord(v: unknown): v is Record<string, unknown> {
+export function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }

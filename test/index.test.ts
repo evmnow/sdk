@@ -1,20 +1,30 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createContractClient, ContractMetadataNotFoundError } from '../src/index'
+import {
+  encodeFacets,
+  encodeBool,
+  rpcEnvelope,
+  getCalldata,
+  getCallTo,
+} from './helpers/abi'
 
 const WETH = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2'
+const DIAMOND = '0x1111111111111111111111111111111111111111'
+const FACET_A = '0x' + 'aa'.repeat(20)
+const FACET_B = '0x' + 'bb'.repeat(20)
 
-// Helpers to build mock fetch responses keyed by URL pattern
 type MockRoute = {
-  match: (url: string) => boolean
+  match: (url: string, body: string) => boolean
   response: { status: number; body: unknown }
 }
 
 function createMockFetch(routes: MockRoute[]) {
-  return vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+  return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString()
+    const body = typeof init?.body === 'string' ? init.body : ''
 
     for (const route of routes) {
-      if (route.match(url)) {
+      if (route.match(url, body)) {
         return {
           ok: route.response.status >= 200 && route.response.status < 300,
           status: route.response.status,
@@ -336,5 +346,401 @@ describe('createContractClient', () => {
     expect(result.natspec).toBeUndefined()
     expect(result.sources).toBeUndefined()
     expect(result.deployedBytecode).toBeUndefined()
+  })
+
+  // ── Diamond (ERC-2535) support ────────────────────────────────────────
+
+  describe('diamond (ERC-2535)', () => {
+    it('detects via ERC-165 and returns composite ABI + facets', async () => {
+      const facetsReturn = encodeFacets([
+        { address: FACET_A, selectors: ['0xa9059cbb', '0x70a08231'] }, // transfer, balanceOf
+        { address: FACET_B, selectors: ['0x18160ddd'] },               // totalSupply
+      ])
+
+      const fetchFn = createMockFetch([
+        // Main diamond Sourcify: not verified
+        { match: url => url.includes(DIAMOND), response: { status: 404, body: null } },
+        // Facet A ABI
+        {
+          match: url => url.includes(FACET_A),
+          response: {
+            status: 200,
+            body: {
+              abi: [
+                { type: 'function', name: 'transfer', inputs: [{ type: 'address' }, { type: 'uint256' }] },
+                { type: 'function', name: 'balanceOf', inputs: [{ type: 'address' }] },
+              ],
+              userdoc: { methods: { 'transfer(address,uint256)': { notice: 'move tokens' } } },
+              devdoc: { methods: {} },
+            },
+          },
+        },
+        // Facet B ABI
+        {
+          match: url => url.includes(FACET_B),
+          response: {
+            status: 200,
+            body: {
+              abi: [{ type: 'function', name: 'totalSupply', inputs: [] }],
+              userdoc: { methods: { 'totalSupply()': { notice: 'total supply' } } },
+              devdoc: { methods: {} },
+            },
+          },
+        },
+        // RPC: ERC-165 supportsInterface → true
+        {
+          match: (url, body) => url.includes('rpc.test')
+            && getCalldata(body).startsWith('0x01ffc9a7'),
+          response: { status: 200, body: rpcEnvelope(encodeBool(true)) },
+        },
+        // RPC: facets()
+        {
+          match: (url, body) => url.includes('rpc.test')
+            && getCalldata(body).startsWith('0x7a0ed627'),
+          response: { status: 200, body: rpcEnvelope(facetsReturn) },
+        },
+      ])
+
+      const client = createContractClient({
+        chainId: 1,
+        rpc: 'https://rpc.test',
+        fetch: fetchFn,
+      })
+
+      const result = await client.get(DIAMOND)
+      expect(result.facets).toHaveLength(2)
+      expect(result.facets?.[0].address).toBe(FACET_A)
+      expect(result.facets?.[0].selectors).toEqual(['0xa9059cbb', '0x70a08231'])
+      expect(result.facets?.[1].address).toBe(FACET_B)
+      expect(result.facets?.[1].selectors).toEqual(['0x18160ddd'])
+
+      // Composite ABI has all three functions
+      const fnNames = (result.abi as any[]).filter(f => f.type === 'function').map(f => f.name).sort()
+      expect(fnNames).toEqual(['balanceOf', 'totalSupply', 'transfer'])
+
+      // NatSpec merged across facets → metadata.functions populated for both
+      expect(result.metadata.functions?.['transfer']).toBeTruthy()
+      expect(result.metadata.functions?.['totalSupply']).toBeTruthy()
+    })
+
+    it('falls back to facets() probe when ERC-165 errors', async () => {
+      const facetsReturn = encodeFacets([
+        { address: FACET_A, selectors: ['0x18160ddd'] },
+      ])
+
+      const fetchFn = createMockFetch([
+        { match: url => url.includes(DIAMOND), response: { status: 404, body: null } },
+        {
+          match: url => url.includes(FACET_A),
+          response: {
+            status: 200,
+            body: {
+              abi: [{ type: 'function', name: 'totalSupply', inputs: [] }],
+              userdoc: { methods: {} },
+              devdoc: { methods: {} },
+            },
+          },
+        },
+        // ERC-165 reverts (JSON-RPC error)
+        {
+          match: (url, body) => url.includes('rpc.test')
+            && getCalldata(body).startsWith('0x01ffc9a7'),
+          response: { status: 200, body: { jsonrpc: '2.0', id: 1, error: { code: -32000, message: 'revert' } } },
+        },
+        {
+          match: (url, body) => url.includes('rpc.test')
+            && getCalldata(body).startsWith('0x7a0ed627'),
+          response: { status: 200, body: rpcEnvelope(facetsReturn) },
+        },
+      ])
+
+      const client = createContractClient({
+        chainId: 1,
+        rpc: 'https://rpc.test',
+        fetch: fetchFn,
+      })
+
+      const result = await client.get(DIAMOND)
+      expect(result.facets).toHaveLength(1)
+      expect((result.abi as any[])[0].name).toBe('totalSupply')
+    })
+
+    it('does not probe facets() when ERC-165 returns definitive false', async () => {
+      const fetchFn = createMockFetch([
+        {
+          match: url => url.includes('sourcify'),
+          response: {
+            status: 200,
+            body: {
+              abi: [{ type: 'function', name: 'foo', inputs: [] }],
+              userdoc: { methods: {} },
+              devdoc: { methods: {} },
+            },
+          },
+        },
+        {
+          match: (url, body) => url.includes('rpc.test')
+            && getCalldata(body).startsWith('0x01ffc9a7'),
+          response: { status: 200, body: rpcEnvelope(encodeBool(false)) },
+        },
+      ])
+
+      const client = createContractClient({
+        chainId: 1,
+        rpc: 'https://rpc.test',
+        fetch: fetchFn,
+      })
+
+      const result = await client.get(WETH)
+      expect(result.facets).toBeUndefined()
+
+      // No facets() call should have been made
+      const calls = (fetchFn as any).mock.calls
+      const facetsProbe = calls.find((c: any[]) => {
+        const body = typeof c[1]?.body === 'string' ? c[1].body : ''
+        return getCalldata(body).startsWith('0x7a0ed627')
+      })
+      expect(facetsProbe).toBeUndefined()
+    })
+
+    it('returns non-diamond result when both probes fail', async () => {
+      const fetchFn = createMockFetch([
+        {
+          match: url => url.includes('sourcify'),
+          response: {
+            status: 200,
+            body: {
+              abi: [{ type: 'function', name: 'foo', inputs: [] }],
+              userdoc: { methods: {} },
+              devdoc: { methods: {} },
+            },
+          },
+        },
+        // Both RPC calls fail with JSON-RPC errors
+        {
+          match: url => url.includes('rpc.test'),
+          response: { status: 200, body: { jsonrpc: '2.0', id: 1, error: { code: -32000, message: 'revert' } } },
+        },
+      ])
+
+      const client = createContractClient({
+        chainId: 1,
+        rpc: 'https://rpc.test',
+        fetch: fetchFn,
+      })
+
+      const result = await client.get(WETH)
+      expect(result.facets).toBeUndefined()
+      expect(result.abi).toEqual([{ type: 'function', name: 'foo', inputs: [] }])
+    })
+
+    it('lists facet even when its Sourcify returns 404 (abi undefined)', async () => {
+      const facetsReturn = encodeFacets([
+        { address: FACET_A, selectors: ['0x11111111', '0x22222222'] },
+      ])
+
+      const fetchFn = createMockFetch([
+        // Diamond + facet both 404 on Sourcify
+        { match: url => url.includes('sourcify'), response: { status: 404, body: null } },
+        {
+          match: (url, body) => url.includes('rpc.test')
+            && getCalldata(body).startsWith('0x01ffc9a7'),
+          response: { status: 200, body: rpcEnvelope(encodeBool(true)) },
+        },
+        {
+          match: (url, body) => url.includes('rpc.test')
+            && getCalldata(body).startsWith('0x7a0ed627'),
+          response: { status: 200, body: rpcEnvelope(facetsReturn) },
+        },
+      ])
+
+      const client = createContractClient({
+        chainId: 1,
+        rpc: 'https://rpc.test',
+        fetch: fetchFn,
+      })
+
+      const result = await client.get(DIAMOND)
+      expect(result.facets).toHaveLength(1)
+      expect(result.facets?.[0].selectors).toEqual(['0x11111111', '0x22222222'])
+      expect(result.facets?.[0].abi).toBeUndefined()
+      expect(result.abi).toBeUndefined() // no ABI from anywhere
+    })
+
+    it('skips zero-address facets', async () => {
+      const facetsReturn = encodeFacets([
+        { address: FACET_A, selectors: ['0x18160ddd'] },
+        { address: '0x' + '00'.repeat(20), selectors: ['0xdeadbeef'] },
+      ])
+
+      const fetchFn = createMockFetch([
+        {
+          match: url => url.includes(FACET_A),
+          response: {
+            status: 200,
+            body: {
+              abi: [{ type: 'function', name: 'totalSupply', inputs: [] }],
+              userdoc: { methods: {} },
+              devdoc: { methods: {} },
+            },
+          },
+        },
+        { match: url => url.includes('sourcify'), response: { status: 404, body: null } },
+        {
+          match: (url, body) => url.includes('rpc.test')
+            && getCalldata(body).startsWith('0x01ffc9a7'),
+          response: { status: 200, body: rpcEnvelope(encodeBool(true)) },
+        },
+        {
+          match: (url, body) => url.includes('rpc.test')
+            && getCalldata(body).startsWith('0x7a0ed627'),
+          response: { status: 200, body: rpcEnvelope(facetsReturn) },
+        },
+      ])
+
+      const client = createContractClient({
+        chainId: 1,
+        rpc: 'https://rpc.test',
+        fetch: fetchFn,
+      })
+
+      const result = await client.get(DIAMOND)
+      expect(result.facets).toHaveLength(1)
+      expect(result.facets?.[0].address).toBe(FACET_A)
+    })
+
+    it('makes no diamond probe calls when sources.diamond is false', async () => {
+      const fetchFn = createMockFetch([
+        {
+          match: url => url.includes('sourcify'),
+          response: {
+            status: 200,
+            body: {
+              abi: [{ type: 'function', name: 'foo', inputs: [] }],
+              userdoc: { methods: {} },
+              devdoc: { methods: {} },
+            },
+          },
+        },
+      ])
+
+      const client = createContractClient({
+        chainId: 1,
+        rpc: 'https://rpc.test',
+        fetch: fetchFn,
+        sources: { diamond: false, contractURI: false },
+      })
+
+      await client.get(WETH)
+
+      const calls = (fetchFn as any).mock.calls
+      const rpcCall = calls.find((c: any[]) => typeof c[0] === 'string' && c[0].includes('rpc.test'))
+      expect(rpcCall).toBeUndefined()
+    })
+
+    it('does not recurse when a facet address itself appears to be a diamond', async () => {
+      // Facet A's Sourcify returns, but if we accidentally re-triggered diamond
+      // detection, we would see extra RPC calls to FACET_A as the "to" address.
+      const facetsReturn = encodeFacets([
+        { address: FACET_A, selectors: ['0x18160ddd'] },
+      ])
+
+      const fetchFn = createMockFetch([
+        { match: url => url.includes(DIAMOND), response: { status: 404, body: null } },
+        {
+          match: url => url.includes(FACET_A),
+          response: {
+            status: 200,
+            body: {
+              abi: [{ type: 'function', name: 'totalSupply', inputs: [] }],
+              userdoc: { methods: {} },
+              devdoc: { methods: {} },
+            },
+          },
+        },
+        {
+          match: (url, body) => url.includes('rpc.test')
+            && getCalldata(body).startsWith('0x01ffc9a7'),
+          response: { status: 200, body: rpcEnvelope(encodeBool(true)) },
+        },
+        {
+          match: (url, body) => url.includes('rpc.test')
+            && getCalldata(body).startsWith('0x7a0ed627'),
+          response: { status: 200, body: rpcEnvelope(facetsReturn) },
+        },
+      ])
+
+      const client = createContractClient({
+        chainId: 1,
+        rpc: 'https://rpc.test',
+        fetch: fetchFn,
+      })
+
+      await client.get(DIAMOND)
+
+      // No RPC call should target FACET_A
+      const calls = (fetchFn as any).mock.calls
+      const facetRpcCall = calls.find((c: any[]) => {
+        if (typeof c[0] !== 'string' || !c[0].includes('rpc.test')) return false
+        const body = typeof c[1]?.body === 'string' ? c[1].body : ''
+        return getCallTo(body) === FACET_A
+      })
+      expect(facetRpcCall).toBeUndefined()
+    })
+
+    it('dedups the same selector across two facets (first wins)', async () => {
+      // Two facets both declare totalSupply(). Diamond spec technically forbids
+      // this, but we still dedup defensively.
+      const facetsReturn = encodeFacets([
+        { address: FACET_A, selectors: ['0x18160ddd'] },
+        { address: FACET_B, selectors: ['0x18160ddd'] },
+      ])
+
+      const fetchFn = createMockFetch([
+        { match: url => url.includes(DIAMOND), response: { status: 404, body: null } },
+        {
+          match: url => url.includes(FACET_A),
+          response: {
+            status: 200,
+            body: {
+              abi: [{ type: 'function', name: 'totalSupply', inputs: [] }],
+              userdoc: { methods: {} },
+              devdoc: { methods: {} },
+            },
+          },
+        },
+        {
+          match: url => url.includes(FACET_B),
+          response: {
+            status: 200,
+            body: {
+              abi: [{ type: 'function', name: 'totalSupply', inputs: [] }],
+              userdoc: { methods: {} },
+              devdoc: { methods: {} },
+            },
+          },
+        },
+        {
+          match: (url, body) => url.includes('rpc.test')
+            && getCalldata(body).startsWith('0x01ffc9a7'),
+          response: { status: 200, body: rpcEnvelope(encodeBool(true)) },
+        },
+        {
+          match: (url, body) => url.includes('rpc.test')
+            && getCalldata(body).startsWith('0x7a0ed627'),
+          response: { status: 200, body: rpcEnvelope(facetsReturn) },
+        },
+      ])
+
+      const client = createContractClient({
+        chainId: 1,
+        rpc: 'https://rpc.test',
+        fetch: fetchFn,
+      })
+
+      const result = await client.get(DIAMOND)
+      const fns = (result.abi as any[]).filter(f => f.type === 'function')
+      expect(fns).toHaveLength(1)
+    })
   })
 })

@@ -1,6 +1,12 @@
 import { parse, toMetadata } from '@1001-digital/natspec'
 import type { SourcifyUserDoc, SourcifyDevDoc } from '@1001-digital/natspec'
-import type { SourcifyResult, FunctionMeta, EventMeta, ErrorMeta } from '../types'
+import type {
+  ContractMetadataDocument,
+  SourcifyResult,
+  FunctionMeta,
+  EventMeta,
+  ErrorMeta,
+} from '../types'
 import { ContractMetadataFetchError } from '../errors'
 
 const DEFAULT_SOURCIFY_URL = 'https://sourcify.dev/server'
@@ -84,4 +90,18 @@ export async function fetchSourcify(
   }
 
   return Object.keys(result).length > 0 ? result : null
+}
+
+/**
+ * Extract the metadata-doc layer (functions/events/errors) from a SourcifyResult.
+ * Returns null when the SourcifyResult has no NatSpec-derived sections.
+ */
+export function buildSourcifyLayer(
+  src: SourcifyResult,
+): Partial<ContractMetadataDocument> | null {
+  const layer: Partial<ContractMetadataDocument> = {}
+  if (src.functions) layer.functions = src.functions
+  if (src.events) layer.events = src.events
+  if (src.errors) layer.errors = src.errors
+  return Object.keys(layer).length > 0 ? layer : null
 }
