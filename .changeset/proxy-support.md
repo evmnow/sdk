@@ -2,64 +2,43 @@
 '@evmnow/sdk': minor
 ---
 
-Generalise ERC-2535 diamond support into full proxy-pattern resolution. The SDK now detects every major proxy convention, folds implementation-side ABI + NatSpec into the main result, and surfaces the detected pattern under `ContractResult.proxy`.
+Initial release of `@evmnow/sdk` — resolve complete contract metadata from multiple sources.
 
-### Supported patterns
+### Sources
 
-`detectProxy` tries each detector in priority order (first match wins):
+- **Repository** — curated JSON from the `contract-metadata` GitHub repo.
+- **contractURI (ERC-7572)** — on-chain contractURI resolution (HTTPS, IPFS, `data:`).
+- **Sourcify v2** — ABI, NatSpec (`userdoc` / `devdoc`), optionally sources + deployed bytecode.
+- **On-chain proxies** — every major proxy convention: ERC-2535 diamonds, EIP-1967 (transparent / UUPS + beacon), EIP-1822, EIP-1167 clones, Gnosis Safe, EIP-897. Implementation-side ABI + NatSpec are folded back into the main result.
 
-- `eip-2535-diamond` — ERC-165 + loupe probe
-- `eip-1967` — transparent / UUPS implementation slot (+ admin slot when present)
-- `eip-1967-beacon` — beacon slot → `implementation()` on the beacon
-- `eip-1822` — UUPS `PROXIABLE` slot
-- `eip-1167` — minimal-proxy / clone bytecode sniff
-- `gnosis-safe` — singleton at storage slot 0
-- `eip-897` — `implementation()` view function (last resort)
+### Features
 
-Single-hop only: a resolved implementation that itself looks like a proxy is not followed. Beacon stays supported as a defined two-step pattern.
+- **`createContractClient(config)`** — factory returning a client with `get`, `fetchRepository`, `fetchContractURI`, `fetchSourcify`, `fetchProxy`.
+- **`client.get(addressOrEns)`** — resolves ENS, fetches every enabled source in parallel, resolves `includes`, and returns a single `ContractResult` with merged metadata, ABI, NatSpec, optional sources + deployed bytecode, and detected proxy info.
+- **Layered merge** — curated repository wins over contractURI wins over Sourcify wins over implementation-derived metadata. Record sections (`functions`, `events`, `errors`, …) shallow-merge per key.
+- **`includes` resolution** — interface references (e.g. `interface:erc721`) are fetched from the schema base and merged left-to-right under the document.
+- **Proxy pipeline** — `detectProxy` orchestrator with priority ordering; single-hop resolution; `sources.proxy: false` skips detection entirely; `sources.sourcify: false` also disables per-target lookups (no hidden traffic).
+- **ENS resolution** — `.eth` names via Universal Resolver, with explicit mainnet RPC support when `chainId !== 1`.
+- **Dependency-injected `fetch`** — pass any fetch-compatible function; no implicit globals.
+- **Pure/standalone exports** — `merge`, `resolveIncludes`, `fetchRepository`, `fetchContractURI`, `fetchSourcify`, `buildSourcifyLayer`, `fetchProxy`, `detectProxy` + per-pattern detectors, `enrichTargets`, `composeProxyResolution`, `buildCompositeAbi`, `filterAbiBySelectors`, `computeSelector`, `canonicalSignature`, `mergeNatspecDocs`, `decodeFacets`, `resolveUri`, `namehash`, `dnsEncode`, RPC helpers — all usable without the client.
 
-### What consumers get
+### Result shape
 
-For every proxy, the SDK now resolves the implementation's ABI + NatSpec from Sourcify and composes them into the top-level result:
-
-- `result.abi` — composite ABI (main-contract ABI first when present, then each target's ABI; first-wins selector dedup)
-- `result.natspec` — merged `userdoc` / `devdoc` (main-contract docs first, then target docs)
-- `result.metadata.functions` / `events` / `errors` — the target-derived metadata layer sits at the lowest priority; curated repository / contractURI / main-contract Sourcify still wins
-- `result.proxy` — `{ pattern, targets[], beacon?, admin?, compositeAbi?, metadataLayer?, natspec? }` so consumers can display "this is a 1967 proxy to 0xabc…" or "this is a diamond with N facets"
-
-Metadata files in the sibling `contract-metadata` repo remain authored against the proxy address — no schema changes.
-
-### Breaking changes
-
-Both this package and the detection primitives are pre-1.0; the rename is a clean break rather than aliased compatibility.
-
-- Dependency: `@1001-digital/diamonds` → `@1001-digital/proxies`
-- Client method: `client.fetchDiamond()` → `client.fetchProxy()`
-- Result field: `ContractResult.facets?: FacetInfo[]` → `ContractResult.proxy?: ProxyResolution`
-- Source config: `sources.diamond` → `sources.proxy`
-- Types: `DiamondResolution` → `ProxyResolution`; `FacetInfo` → `TargetInfo`; `FetchDiamondOptions` → `FetchProxyOptions`; `RawFacet` removed (replaced by `RawProxy` + `ResolvedTarget`)
-- Module subpath: `@evmnow/sdk/sources/diamond` → `@evmnow/sdk/sources/proxy`
-- Standalone function: `fetchDiamond` → `fetchProxy`; `enrichFacets` → `enrichTargets`; `composeDiamondResolution` → `composeProxyResolution`
-- New re-exports: `detectProxy`, `detectDiamond`, `detectEip1967`, `detectEip1967Beacon`, `detectEip1822`, `detectEip1167`, `detectGnosisSafe`, `detectEip897`, and the associated storage-slot constants
-
-### Migration
-
-```diff
--import type { DiamondResolution, FacetInfo } from '@evmnow/sdk'
-+import type { ProxyResolution, TargetInfo } from '@evmnow/sdk'
-
- const client = createContractClient({ chainId: 1, rpc })
--const diamond = await client.fetchDiamond(address)
--console.log(diamond?.facets)
-+const proxy = await client.fetchProxy(address)
-+console.log(proxy?.pattern, proxy?.targets)
-
--client.get(address, { sources: { diamond: false } })
-+client.get(address, { sources: { proxy: false } })
-
- const result = await client.get(address)
--result.facets
-+result.proxy?.targets
+```ts
+interface ContractResult {
+  chainId: number
+  address: string
+  metadata: ContractMetadataDocument   // merged across every source
+  abi?: unknown[]                       // composite (main contract + implementation targets)
+  natspec?: { userdoc?; devdoc? }
+  sources?: Record<string, string>
+  deployedBytecode?: string
+  proxy?: ProxyResolution               // pattern, targets, beacon?, admin?, …
+}
 ```
 
-Diamond behaviour is preserved exactly — it's now one `pattern` value (`'eip-2535-diamond'`) among seven.
+### Package layout
+
+- Vite build with `preserveModules: true` mirrors `src/` → `dist/` 1:1 — every module is independently importable under `@evmnow/sdk/...` (declared in `package.json#exports`).
+- `sideEffects: false` for aggressive tree-shaking.
+- Minimal runtime dependencies: `@1001-digital/proxies`, `@1001-digital/natspec`, `@noble/hashes`.
