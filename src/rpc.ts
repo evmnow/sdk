@@ -1,7 +1,9 @@
 import { ContractMetadataFetchError, ENSResolutionError } from './errors'
 import { namehash, dnsEncode } from './ens'
 
-// ENS Universal Resolver on mainnet
+// ENS Universal Resolver on Ethereum mainnet. Resolution only works when
+// `resolveEns` is called with a mainnet RPC — see `ensRpc` in
+// `ContractClientConfig`.
 const UNIVERSAL_RESOLVER = '0xce01f8eee7E479C928F8919abD53E553a36CeF67'
 
 // Precomputed function selectors
@@ -11,21 +13,16 @@ const ADDR_SELECTOR = '0x3b3b57de'                   // addr(bytes32)
 
 const decoder = new TextDecoder()
 
-export async function ethCall(
+async function jsonRpcCall(
   rpc: string,
-  to: string,
-  data: string,
+  method: string,
+  params: unknown[],
   fetchFn: typeof fetch,
-): Promise<string> {
+): Promise<string | undefined> {
   const res = await fetchFn(rpc, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'eth_call',
-      params: [{ to, data }, 'latest'],
-    }),
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
   })
 
   if (!res.ok) {
@@ -38,7 +35,25 @@ export async function ethCall(
     throw new ContractMetadataFetchError('rpc', 0, `RPC error: ${json.error.message}`)
   }
 
-  return json.result ?? '0x'
+  return json.result
+}
+
+export async function getChainId(rpc: string, fetchFn: typeof fetch): Promise<number> {
+  const result = await jsonRpcCall(rpc, 'eth_chainId', [], fetchFn)
+  if (typeof result !== 'string') {
+    throw new ContractMetadataFetchError('rpc', 0, 'RPC eth_chainId returned no result')
+  }
+  return parseInt(result, 16)
+}
+
+export async function ethCall(
+  rpc: string,
+  to: string,
+  data: string,
+  fetchFn: typeof fetch,
+): Promise<string> {
+  const result = await jsonRpcCall(rpc, 'eth_call', [{ to, data }, 'latest'], fetchFn)
+  return result ?? '0x'
 }
 
 export async function resolveEns(

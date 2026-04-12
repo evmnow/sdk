@@ -11,7 +11,7 @@ import type {
 } from './types'
 import { ContractMetadataNotFoundError } from './errors'
 import { merge, resolveIncludes } from './merge'
-import { resolveEns } from './rpc'
+import { resolveEns, getChainId } from './rpc'
 import { fetchRepository as fetchRepo } from './sources/repository'
 import { fetchContractURI as fetchUri } from './sources/contract-uri'
 import { fetchSourcify as fetchSrc, buildSourcifyLayer } from './sources/sourcify'
@@ -31,6 +31,9 @@ const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 export function createContractClient(config: ContractClientConfig): ContractClient {
   const chainId = config.chainId
   const rpc = config.rpc
+  // ENS lives on Ethereum mainnet. When the user's contract rpc is already
+  // mainnet, reuse it; otherwise they must provide an explicit mainnet rpc.
+  const ensRpc = config.ensRpc ?? (chainId === 1 ? rpc : undefined)
   const repositoryUrl = config.repositoryUrl?.replace(/\/$/, '')
   const sourcifyUrl = config.sourcifyUrl?.replace(/\/$/, '')
   const ipfsGateway = config.ipfsGateway?.replace(/\/$/, '')
@@ -38,16 +41,35 @@ export function createContractClient(config: ContractClientConfig): ContractClie
   const defaultSources = config.sources ?? {}
   const defaultInclude = config.include ?? {}
 
+  // Lazy, memoized consistency check between config.chainId and the rpc's
+  // eth_chainId. Runs once per client, before the first RPC-dependent call.
+  let rpcCheck: Promise<void> | null = null
+  function ensureRpcChainId(): Promise<void> {
+    if (!rpc) return Promise.resolve()
+    if (!rpcCheck) {
+      rpcCheck = getChainId(rpc, fetchFn).then(actual => {
+        if (actual !== chainId) {
+          throw new Error(
+            `RPC chainId mismatch: config.chainId=${chainId} but rpc returned ${actual}`,
+          )
+        }
+      })
+    }
+    return rpcCheck
+  }
+
   async function resolveAddress(addressOrEns: string): Promise<string> {
     if (ADDRESS_RE.test(addressOrEns)) {
       return addressOrEns.toLowerCase()
     }
 
     if (addressOrEns.endsWith('.eth')) {
-      if (!rpc) {
-        throw new Error('RPC URL required for ENS resolution')
+      if (!ensRpc) {
+        throw new Error(
+          'ENS resolution requires a mainnet RPC — set `ensRpc`, or set `rpc` when chainId === 1',
+        )
       }
-      const resolved = await resolveEns(rpc, addressOrEns, fetchFn)
+      const resolved = await resolveEns(ensRpc, addressOrEns, fetchFn)
       return resolved.toLowerCase()
     }
 
@@ -88,7 +110,9 @@ export function createContractClient(config: ContractClientConfig): ContractClie
 
     const diamondPromise: Promise<RawFacet[] | null> =
       isEnabled(sources, 'diamond') && rpc
-        ? detectAndFetchFacets(rpc, address, fetchFn).catch(() => null)
+        ? ensureRpcChainId()
+            .then(() => detectAndFetchFacets(rpc, address, fetchFn))
+            .catch(() => null)
         : Promise.resolve(null)
 
     const [repoRaw, uriResult, srcResult, rawFacets] = await Promise.all([
@@ -204,6 +228,7 @@ export function createContractClient(config: ContractClientConfig): ContractClie
     address: string,
   ): Promise<Partial<ContractMetadataDocument> | null> {
     if (!rpc) return null
+    await ensureRpcChainId()
     return fetchUri(chainId, address, rpc, fetchFn, ipfsGateway)
   }
 

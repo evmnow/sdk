@@ -193,6 +193,12 @@ export interface IncludeFields {
 export interface ContractClientConfig {
   chainId: number
   rpc?: string
+  /**
+   * Ethereum mainnet RPC used exclusively for ENS resolution. Required when
+   * `chainId !== 1` and callers may pass `.eth` names. Defaults to `rpc`
+   * when `chainId === 1`.
+   */
+  ensRpc?: string
   repositoryUrl?: string
   sourcifyUrl?: string
   ipfsGateway?: string

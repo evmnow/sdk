@@ -18,7 +18,7 @@ type MockRoute = {
   response: { status: number; body: unknown }
 }
 
-function createMockFetch(routes: MockRoute[]) {
+function createMockFetch(routes: MockRoute[], chainIdHex = '0x1') {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString()
     const body = typeof init?.body === 'string' ? init.body : ''
@@ -31,6 +31,17 @@ function createMockFetch(routes: MockRoute[]) {
           json: () => Promise.resolve(route.response.body),
           text: () => Promise.resolve(JSON.stringify(route.response.body)),
         }
+      }
+    }
+
+    // Implicit default: respond to eth_chainId so factory validation passes.
+    // Tests that want to assert mismatch behavior should add their own
+    // higher-priority eth_chainId route.
+    if (body.includes('"method":"eth_chainId"')) {
+      return {
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ jsonrpc: '2.0', id: 1, result: chainIdHex }),
       }
     }
 
@@ -103,7 +114,7 @@ describe('createContractClient', () => {
         response: { status: 200, body: sourcifyResponse },
       },
       {
-        match: url => url.includes('rpc.test'),
+        match: (url, body) => url.includes('rpc.test') && body.includes('"method":"eth_call"'),
         response: { status: 200, body: { jsonrpc: '2.0', id: 1, result: abiResult } },
       },
     ])
@@ -286,14 +297,107 @@ describe('createContractClient', () => {
     await expect(client.get('not-an-address')).rejects.toThrow('Invalid address or ENS name')
   })
 
-  it('requires rpc for ENS resolution', async () => {
+  it('requires a mainnet RPC for ENS resolution on mainnet', async () => {
     const client = createContractClient({
       chainId: 1,
       fetch: vi.fn() as unknown as typeof fetch,
-      // no rpc
+      // no rpc, no ensRpc
     })
 
-    await expect(client.get('vitalik.eth')).rejects.toThrow('RPC URL required')
+    await expect(client.get('vitalik.eth')).rejects.toThrow('ENS resolution requires a mainnet RPC')
+  })
+
+  it('requires ensRpc for ENS resolution on non-mainnet chains', async () => {
+    // Even with an rpc configured, ENS must not piggyback on a non-mainnet RPC
+    // (Universal Resolver only exists on mainnet).
+    const client = createContractClient({
+      chainId: 42161,
+      rpc: 'https://arb.rpc.test',
+      fetch: vi.fn() as unknown as typeof fetch,
+      // no ensRpc
+    })
+
+    await expect(client.get('vitalik.eth')).rejects.toThrow('ENS resolution requires a mainnet RPC')
+  })
+
+  it('routes ENS resolution through ensRpc, not rpc, on non-mainnet chains', async () => {
+    // We only need the mock to get as far as resolveEns on the ensRpc. The
+    // ENS response itself doesn't need to be correct — we're asserting routing.
+    const fetchFn = createMockFetch([
+      {
+        // Valid resolve() response: ABI-encoded bytes containing an address.
+        match: (url, body) => url === 'https://mainnet.rpc.test' && body.includes('"method":"eth_call"'),
+        response: {
+          status: 200,
+          body: {
+            jsonrpc: '2.0',
+            id: 1,
+            // offset(0x20) + length(0x20) + addr(20 bytes padded to 32)
+            result: '0x'
+              + '0000000000000000000000000000000000000000000000000000000000000020'
+              + '0000000000000000000000000000000000000000000000000000000000000020'
+              + '000000000000000000000000' + 'c0'.repeat(20),
+          },
+        },
+      },
+      {
+        // Sourcify 404 so get() can short-circuit without further RPC work.
+        match: url => url.includes('sourcify'),
+        response: { status: 404, body: null },
+      },
+      {
+        match: url => url.includes('contract-metadata'),
+        response: { status: 404, body: null },
+      },
+    ], '0xa4b1') // arbitrum chainId for the non-mainnet rpc
+
+    const client = createContractClient({
+      chainId: 42161,
+      rpc: 'https://arb.rpc.test',
+      ensRpc: 'https://mainnet.rpc.test',
+      fetch: fetchFn,
+    })
+
+    // The resolved address won't have metadata; we only care that resolution
+    // happened against ensRpc.
+    await client.get('vitalik.eth').catch(() => null)
+
+    const calls = (fetchFn as any).mock.calls
+    const mainnetCalls = calls.filter((c: any[]) => c[0] === 'https://mainnet.rpc.test')
+    const arbEnsCalls = calls.filter((c: any[]) => {
+      if (c[0] !== 'https://arb.rpc.test') return false
+      // Any eth_call targeting the Universal Resolver would be ENS leaking onto arb
+      const body = typeof c[1]?.body === 'string' ? c[1].body : ''
+      return body.toLowerCase().includes('0xce01f8eee7e479c928f8919abd53e553a36cef67')
+    })
+
+    expect(mainnetCalls.length).toBeGreaterThan(0)
+    expect(arbEnsCalls.length).toBe(0)
+  })
+
+  it('throws when rpc eth_chainId disagrees with config.chainId', async () => {
+    // Explicit eth_chainId mock that returns Base (8453) instead of mainnet.
+    const fetchFn = createMockFetch([
+      {
+        match: (url, body) => url.includes('rpc.test') && body.includes('"method":"eth_chainId"'),
+        response: { status: 200, body: { jsonrpc: '2.0', id: 1, result: '0x2105' } }, // 8453
+      },
+      {
+        match: url => url.includes('sourcify'),
+        response: { status: 404, body: null },
+      },
+    ])
+
+    const client = createContractClient({
+      chainId: 1,
+      rpc: 'https://rpc.test',
+      fetch: fetchFn,
+    })
+
+    // fetchContractURI surfaces the mismatch directly. (Inside get(), the
+    // contractURI and diamond paths swallow it into null via their .catch
+    // handlers, which would surface as a generic NotFound instead.)
+    await expect(client.fetchContractURI(WETH)).rejects.toThrow('RPC chainId mismatch')
   })
 
   it('does not request sources/bytecode from Sourcify by default', async () => {
@@ -518,7 +622,7 @@ describe('createContractClient', () => {
         },
         // Both RPC calls fail with JSON-RPC errors
         {
-          match: url => url.includes('rpc.test'),
+          match: (url, body) => url.includes('rpc.test') && body.includes('"method":"eth_call"'),
           response: { status: 200, body: { jsonrpc: '2.0', id: 1, error: { code: -32000, message: 'revert' } } },
         },
       ])
