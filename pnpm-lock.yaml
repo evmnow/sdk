@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@1001-digital/diamonds':
+        specifier: ^0.1.0
+        version: 0.1.0
       '@1001-digital/natspec':
         specifier: ^0.1.0
         version: 0.1.0
@@ -32,6 +35,9 @@ importers:
         version: 3.2.4
 
 packages:
+
+  '@1001-digital/diamonds@0.1.0':
+    resolution: {integrity: sha512-FIuw5RmCVXI1DCsUGHRYFk8sK0HDHnpGb8ssFz7nicQ6cBL2rEi7TNzZW3ubaOInACXg0zT4voleaCuetziBfQ==}
 
   '@1001-digital/natspec@0.1.0':
     resolution: {integrity: sha512-ryf+rjlmPPGoOMNktj4vrIvKmE3DNd7Un/0M9yKgtyB3oPC4vYhRoYhowX4uXep5iyBlB6zpOm73zSBsNX+PKg==}
@@ -1299,6 +1305,10 @@ packages:
     resolution: {integrity: sha512-3wdGidZyq5PB084XLES5TpOSRA3wjXAlIWMhum2kRcv/41Sn2emQ0dycQW4uZXLejwKvg6EsvbdlVL+FYEct7A==}
 
 snapshots:
+
+  '@1001-digital/diamonds@0.1.0':
+    dependencies:
+      '@noble/hashes': 1.8.0
 
   '@1001-digital/natspec@0.1.0': {}
 

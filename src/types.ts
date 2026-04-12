@@ -238,10 +238,7 @@ export interface FacetInfo {
 }
 
 /** Raw on-chain facets() result: address + selectors per facet, no ABI. */
-export interface RawFacet {
-  facetAddress: string
-  functionSelectors: string[]
-}
+export type { RawFacet } from '@1001-digital/diamonds'
 
 export interface DiamondResolution {
   /** All live facets (zero-address entries filtered out). */

@@ -14,6 +14,7 @@ export default defineConfig({
     },
     rollupOptions: {
       external: [
+        '@1001-digital/diamonds',
         '@1001-digital/natspec',
         '@noble/hashes/sha3',
       ],
