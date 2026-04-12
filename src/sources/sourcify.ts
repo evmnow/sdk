@@ -18,13 +18,19 @@ interface SourcifyResponse {
   sources?: Record<string, SourcifySource>
 }
 
+const BASE_FIELDS = 'abi,name,userdoc,devdoc'
+
 export async function fetchSourcify(
   chainId: number,
   address: string,
   fetchFn: typeof fetch,
   baseUrl = DEFAULT_SOURCIFY_URL,
+  extraFields?: string[],
 ): Promise<SourcifyResult | null> {
-  const url = `${baseUrl}/v2/contract/${chainId}/${address}?fields=abi,name,userdoc,devdoc,deployedBytecode,sources`
+  const fields = extraFields?.length
+    ? `${BASE_FIELDS},${extraFields.join(',')}`
+    : BASE_FIELDS
+  const url = `${baseUrl}/v2/contract/${chainId}/${address}?fields=${fields}`
 
   let res: Response
   try {

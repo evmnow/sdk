@@ -66,10 +66,21 @@ describe('fetchSourcify', () => {
     expect(result!.functions).toBeUndefined()
   })
 
-  it('constructs correct URL with fields', async () => {
+  it('constructs URL with base fields by default', async () => {
     const fetchFn = mockFetch({ userdoc: { methods: {} }, devdoc: { methods: {} } })
 
     await fetchSourcify(chainId, address, fetchFn, 'https://sourcify.test')
+
+    expect(fetchFn).toHaveBeenCalledWith(
+      `https://sourcify.test/v2/contract/${chainId}/${address}?fields=abi,name,userdoc,devdoc`,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
+  })
+
+  it('appends extra fields when requested', async () => {
+    const fetchFn = mockFetch({ userdoc: { methods: {} }, devdoc: { methods: {} } })
+
+    await fetchSourcify(chainId, address, fetchFn, 'https://sourcify.test', ['deployedBytecode', 'sources'])
 
     expect(fetchFn).toHaveBeenCalledWith(
       `https://sourcify.test/v2/contract/${chainId}/${address}?fields=abi,name,userdoc,devdoc,deployedBytecode,sources`,
@@ -86,7 +97,7 @@ describe('fetchSourcify', () => {
     }
     const fetchFn = mockFetch(response)
 
-    const result = await fetchSourcify(chainId, address, fetchFn, 'https://sourcify.test')
+    const result = await fetchSourcify(chainId, address, fetchFn, 'https://sourcify.test', ['deployedBytecode'])
     expect(result!.deployedBytecode).toBe('0x6060604052')
   })
 
@@ -102,7 +113,7 @@ describe('fetchSourcify', () => {
     }
     const fetchFn = mockFetch(response)
 
-    const result = await fetchSourcify(chainId, address, fetchFn, 'https://sourcify.test')
+    const result = await fetchSourcify(chainId, address, fetchFn, 'https://sourcify.test', ['sources'])
     expect(result!.sources).toEqual({
       'contracts/Token.sol': 'pragma solidity ^0.8.0;',
       'contracts/lib/Utils.sol': 'library Utils {}',

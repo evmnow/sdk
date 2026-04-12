@@ -4,6 +4,7 @@ import type {
   ContractMetadataDocument,
   ContractResult,
   GetOptions,
+  IncludeFields,
   SourcifyResult,
   SourceConfig,
 } from './types'
@@ -27,6 +28,7 @@ export function createContractClient(config: ContractClientConfig): ContractClie
   const ipfsGateway = config.ipfsGateway?.replace(/\/$/, '')
   const fetchFn = config.fetch ?? globalThis.fetch
   const defaultSources = config.sources ?? {}
+  const defaultInclude = config.include ?? {}
 
   async function resolveAddress(addressOrEns: string): Promise<string> {
     if (ADDRESS_RE.test(addressOrEns)) {
@@ -58,6 +60,12 @@ export function createContractClient(config: ContractClientConfig): ContractClie
   ): Promise<ContractResult> {
     const address = await resolveAddress(addressOrEns)
     const sources = effectiveSources(options?.sources)
+    const include: IncludeFields = { ...defaultInclude, ...options?.include }
+
+    // Build list of extra Sourcify fields based on include options
+    const extraFields: string[] = []
+    if (include.sources) extraFields.push('sources')
+    if (include.deployedBytecode) extraFields.push('deployedBytecode')
 
     const repoPromise = isEnabled(sources, 'repository')
       ? fetchRepository(address).catch(() => null)
@@ -68,7 +76,7 @@ export function createContractClient(config: ContractClientConfig): ContractClie
       : Promise.resolve(null)
 
     const srcPromise = isEnabled(sources, 'sourcify')
-      ? fetchSourcify(address).catch(() => null)
+      ? fetchSourcifyWithFields(address, extraFields).catch(() => null)
       : Promise.resolve(null)
 
     const [repoRaw, uriResult, srcResult] = await Promise.all([
@@ -81,7 +89,6 @@ export function createContractClient(config: ContractClientConfig): ContractClie
       repoResult = await resolveIncludes(repoResult, fetchFn, DEFAULT_SCHEMA_BASE)
     }
 
-    // Build sourcify layer (extract metadata-compatible fields)
     const sourcifyLayer: Partial<ContractMetadataDocument> | null = srcResult
       ? buildSourcifyLayer(srcResult)
       : null
@@ -96,19 +103,12 @@ export function createContractClient(config: ContractClientConfig): ContractClie
     const result: ContractResult = {
       chainId,
       address,
-      metadata: {
-        ...merged,
-        chainId,
-        address,
-      } as ContractMetadataDocument,
+      metadata: { ...merged, chainId, address } as ContractMetadataDocument,
     }
 
-    // Attach non-metadata fields from Sourcify
     if (srcResult?.abi) result.abi = srcResult.abi
     if (srcResult?.userdoc || srcResult?.devdoc) {
-      result.natspec = {}
-      if (srcResult.userdoc) result.natspec.userdoc = srcResult.userdoc
-      if (srcResult.devdoc) result.natspec.devdoc = srcResult.devdoc
+      result.natspec = { userdoc: srcResult.userdoc, devdoc: srcResult.devdoc }
     }
     if (srcResult?.sources) result.sources = srcResult.sources
     if (srcResult?.deployedBytecode) result.deployedBytecode = srcResult.deployedBytecode
@@ -129,10 +129,17 @@ export function createContractClient(config: ContractClientConfig): ContractClie
     return fetchUri(chainId, address, rpc, fetchFn, ipfsGateway)
   }
 
+  async function fetchSourcifyWithFields(
+    address: string,
+    extraFields?: string[],
+  ): Promise<SourcifyResult | null> {
+    return fetchSrc(chainId, address, fetchFn, sourcifyUrl, extraFields)
+  }
+
   async function fetchSourcify(
     address: string,
   ): Promise<SourcifyResult | null> {
-    return fetchSrc(chainId, address, fetchFn, sourcifyUrl)
+    return fetchSrc(chainId, address, fetchFn, sourcifyUrl, ['sources', 'deployedBytecode'])
   }
 
   return { get, fetchRepository, fetchContractURI, fetchSourcify }
@@ -166,6 +173,7 @@ export type {
   ContractResult,
   NatSpec,
   GetOptions,
+  IncludeFields,
   SourceConfig,
   SourcifyResult,
   DocumentMeta,

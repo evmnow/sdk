@@ -104,7 +104,9 @@ describe('createContractClient', () => {
       fetch: fetchFn,
     })
 
-    const result = await client.get(WETH)
+    const result = await client.get(WETH, {
+      include: { sources: true, deployedBytecode: true },
+    })
 
     // Top-level identity
     expect(result.chainId).toBe(1)
@@ -128,10 +130,10 @@ describe('createContractClient', () => {
     expect(result.natspec?.userdoc).toBeTruthy()
     expect(result.natspec?.devdoc).toBeTruthy()
 
-    // Source code
+    // Source code (opt-in via include)
     expect(result.sources).toEqual({ 'contracts/WETH9.sol': 'pragma solidity ^0.4.18;' })
 
-    // Deployed bytecode
+    // Deployed bytecode (opt-in via include)
     expect(result.deployedBytecode).toBe('0x6060604052')
   })
 
@@ -281,6 +283,35 @@ describe('createContractClient', () => {
     })
 
     await expect(client.get('vitalik.eth')).rejects.toThrow('RPC URL required')
+  })
+
+  it('does not request sources/bytecode from Sourcify by default', async () => {
+    const sourcifyResponse = {
+      name: 'WETH9',
+      abi: [{ type: 'function', name: 'deposit' }],
+      userdoc: { methods: {} },
+      devdoc: { methods: {} },
+    }
+
+    const fetchFn = createMockFetch([
+      {
+        match: url => url.includes('sourcify'),
+        response: { status: 200, body: sourcifyResponse },
+      },
+    ])
+
+    const client = createContractClient({
+      chainId: 1,
+      fetch: fetchFn,
+    })
+
+    await client.get(WETH)
+
+    const sourcifyCall = (fetchFn as any).mock.calls
+      .map((c: any) => c[0])
+      .find((url: string) => url.includes('sourcify'))
+    expect(sourcifyCall).not.toContain('deployedBytecode')
+    expect(sourcifyCall).not.toContain('sources')
   })
 
   it('omits natspec/sources/bytecode when sourcify has none', async () => {

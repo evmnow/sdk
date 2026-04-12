@@ -184,6 +184,11 @@ export interface SourceConfig {
   sourcify?: boolean
 }
 
+export interface IncludeFields {
+  sources?: boolean
+  deployedBytecode?: boolean
+}
+
 export interface ContractClientConfig {
   chainId: number
   rpc?: string
@@ -192,10 +197,12 @@ export interface ContractClientConfig {
   ipfsGateway?: string
   fetch?: typeof globalThis.fetch
   sources?: SourceConfig
+  include?: IncludeFields
 }
 
 export interface GetOptions {
   sources?: SourceConfig
+  include?: IncludeFields
 }
 
 // ── Result ──
