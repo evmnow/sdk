@@ -1,6 +1,6 @@
 # @evmnow/sdk
 
-Resolve complete contract metadata for any EVM contract from multiple sources — curated repository, on-chain `contractURI` (ERC-7572), and Sourcify + NatSpec — merged into a single document.
+Resolve complete contract metadata for any EVM contract from multiple sources — curated repository, on-chain `contractURI` (ERC-7572), Sourcify + NatSpec, and ERC-2535 diamond facets — merged into a single document.
 
 ## Install
 
@@ -23,8 +23,7 @@ const result = await client.get('0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984')
 console.log(result.metadata.name)        // "Uniswap"
 console.log(result.metadata.description) // ...
 console.log(result.metadata.functions)   // { "delegate(address)": { title: "...", ... }, ... }
-console.log(result.abi)                  // full ABI from Sourcify
-console.log(result.sources)             // verified source files
+console.log(result.abi)                  // full ABI from Sourcify (composite for diamonds)
 ```
 
 ENS names work too:
@@ -35,11 +34,12 @@ const result = await client.get('uniswap.eth')
 
 ## How it works
 
-The SDK fetches metadata from three sources in parallel, then merges them with increasing priority:
+The SDK fetches metadata from four sources in parallel, then merges them with increasing priority:
 
 | Priority | Source | What it provides |
 |----------|--------|-----------------|
-| Lowest | **Sourcify** | ABI and function/event/error descriptions from NatSpec comments |
+| Lowest | **Diamond facets** (ERC-2535) | Per-facet ABI + NatSpec, merged into a composite ABI and `result.facets` |
+| Low | **Sourcify** | ABI and function/event/error descriptions from NatSpec comments |
 | Medium | **contractURI** | On-chain ERC-7572 fields: name, symbol, description, image, links |
 | Highest | **Repository** | Curated JSON from the [evmnow/contract-metadata](https://github.com/evmnow/contract-metadata) repo — full control over every field |
 
@@ -53,20 +53,32 @@ const client = createContractClient({
   chainId: 1,
 
   // Optional
-  rpc: 'https://eth.llamarpc.com',       // needed for contractURI + ENS resolution
-  repositoryUrl: '...',                    // custom metadata repo base URL
+  rpc: 'https://eth.llamarpc.com',        // needed for contractURI, diamond, ENS on mainnet
+  ensRpc: 'https://eth.llamarpc.com',     // mainnet RPC for ENS when chainId !== 1
+  repositoryUrl: '...',                   // custom metadata repo base URL
   sourcifyUrl: 'https://sourcify.dev/server',
   ipfsGateway: 'https://ipfs.io',
   fetch: customFetch,                     // custom fetch implementation
 
   // Disable specific sources globally
   sources: {
-    repository: true,  // default: true
+    repository: true,   // default: true
     contractURI: true,  // default: true (requires rpc)
     sourcify: true,     // default: true
+    diamond: true,      // default: true (requires rpc)
+  },
+
+  // Opt-in fields that aren't included by default
+  include: {
+    sources: false,           // verified source files from Sourcify
+    deployedBytecode: false,  // deployed bytecode from Sourcify
   },
 })
 ```
+
+ENS resolution only works on Ethereum mainnet. If `chainId === 1`, `rpc` is reused for ENS; otherwise set `ensRpc` explicitly to enable `.eth` name lookups.
+
+The SDK performs a one-time consistency check that `config.chainId` matches the RPC's `eth_chainId`, the first time an RPC-dependent method runs.
 
 ## API
 
@@ -76,7 +88,7 @@ Creates a client bound to a specific chain.
 
 ### `client.get(addressOrEns, options?)` → `ContractResult`
 
-Fetches and merges metadata from all enabled sources. Accepts a `0x` address or `.eth` ENS name (requires `rpc`).
+Fetches and merges metadata from all enabled sources. Accepts a `0x` address or `.eth` ENS name (requires mainnet RPC via `rpc` or `ensRpc`).
 
 Returns a `ContractResult`:
 
@@ -85,17 +97,28 @@ interface ContractResult {
   chainId: number
   address: string
   metadata: ContractMetadataDocument  // merged metadata from all sources
-  abi?: unknown[]                     // full ABI from Sourcify
-  natspec?: NatSpec                   // raw userdoc/devdoc from Sourcify
-  sources?: Record<string, string>    // verified source files from Sourcify
-  deployedBytecode?: string           // deployed bytecode from Sourcify
+  abi?: unknown[]                     // ABI from Sourcify (composite for diamonds)
+  natspec?: NatSpec                   // raw userdoc/devdoc (merged across facets)
+  sources?: Record<string, string>    // verified source files (requires include.sources)
+  deployedBytecode?: string           // deployed bytecode (requires include.deployedBytecode)
+  facets?: FacetInfo[]                // per-facet info when the contract is an ERC-2535 diamond
+}
+
+interface FacetInfo {
+  address: string
+  selectors: string[]
+  abi?: unknown[]      // the facet's ABI filtered to its mounted selectors
+  natspec?: NatSpec
 }
 ```
 
+Per-call overrides mirror the config shape:
+
 ```ts
-// Disable a source for a single call
+// Disable a source and opt into extra fields for a single call
 const result = await client.get('0x...', {
   sources: { sourcify: false },
+  include: { sources: true, deployedBytecode: true },
 })
 ```
 
@@ -111,7 +134,7 @@ Fetch only the on-chain contractURI. Returns `null` if not found or no RPC confi
 
 ### `client.fetchSourcify(address)`
 
-Fetch only from Sourcify. Returns the raw `SourcifyResult` (ABI, parsed NatSpec, sources, bytecode).
+Fetch only from Sourcify. Always requests `sources` and `deployedBytecode` alongside the base fields, and returns the raw `SourcifyResult` (ABI, parsed NatSpec, sources, bytecode).
 
 ### `merge(...layers)`
 
@@ -129,14 +152,19 @@ The resolved document follows the [contract-metadata schema](https://github.com/
 
 ```ts
 interface ContractMetadataDocument {
+  $schema?: string
   chainId: number
   address: string
+  includes?: string[]
+  meta?: DocumentMeta
   name?: string
   symbol?: string
   description?: string
   image?: string
   banner_image?: string
+  featured_image?: string
   external_link?: string
+  collaborators?: string[]
   about?: string
   category?: string
   tags?: string[]
@@ -149,7 +177,7 @@ interface ContractMetadataDocument {
   events?: Record<string, EventMeta>
   errors?: Record<string, ErrorMeta>
   messages?: Record<string, MessageMeta>
-  // ...
+  [key: `_${string}`]: unknown   // extension fields allowed on any underscore-prefixed key
 }
 ```
 
@@ -167,6 +195,17 @@ Repository metadata can reference shared interfaces via the `includes` field:
 ```
 
 Interfaces are fetched from the schema repo and merged as a base layer, with the document's own fields taking priority.
+
+## Diamonds (ERC-2535)
+
+When the `diamond` source is enabled and an `rpc` is configured, the SDK detects [ERC-2535](https://eips.ethereum.org/EIPS/eip-2535) diamonds via `supportsInterface(0x48e2b093)` with a `facets()` fallback. For each live facet, it fetches Sourcify separately, filters the facet's ABI to its mounted selectors, and expands the result:
+
+- `result.facets` — one entry per facet with its address, selectors, filtered ABI, and NatSpec
+- `result.abi` — composite ABI across the main diamond + every facet (first-occurrence wins, deduped by selector for functions and by signature for events/errors)
+- `result.natspec` — `userdoc` / `devdoc` merged across the diamond and its facets, main doc taking priority
+- `result.metadata.functions` / `events` / `errors` — NatSpec-derived sections from every facet layered in at lowest priority, so curated repo/contractURI/main-Sourcify fields still win
+
+Facets are fetched directly from Sourcify (not recursively through `client.get`), which guards against facets that themselves look like diamonds.
 
 ## Error handling
 
