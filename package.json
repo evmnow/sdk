@@ -42,9 +42,9 @@
       "types": "./dist/sources/sourcify.d.ts",
       "import": "./dist/sources/sourcify.js"
     },
-    "./sources/diamond": {
-      "types": "./dist/sources/diamond.d.ts",
-      "import": "./dist/sources/diamond.js"
+    "./sources/proxy": {
+      "types": "./dist/sources/proxy.d.ts",
+      "import": "./dist/sources/proxy.js"
     }
   },
   "main": "./dist/index.js",
@@ -62,7 +62,7 @@
     "changeset": "changeset"
   },
   "dependencies": {
-    "@1001-digital/diamonds": "^0.1.0",
+    "@1001-digital/proxies": "^0.1.0",
     "@1001-digital/natspec": "^0.1.0",
     "@noble/hashes": "^1.7.0"
   },

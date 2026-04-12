@@ -41,8 +41,35 @@ export const encodeFacets = (
 /** ABI-encoded bool (32 bytes). */
 export const encodeBool = (v: boolean): string => '0x' + word(v ? 1 : 0)
 
-/** Wrap an eth_call result in a JSON-RPC envelope. */
+/** ABI-encoded address (right-padded into a 32-byte word). */
+export const encodeAddress = (addr: string): string =>
+  '0x' + word(addr.replace(/^0x/, ''))
+
+/** EIP-1167 minimal proxy runtime bytecode for a given implementation. */
+export const encodeEip1167Bytecode = (impl: string): string =>
+  '0x363d3d373d3d3d363d73' + impl.replace(/^0x/, '').toLowerCase() + '5af43d82803e903d91602b57fd5bf3'
+
+/** Wrap an eth_call / eth_getStorageAt / eth_getCode result in a JSON-RPC envelope. */
 export const rpcEnvelope = (result: string) => ({ jsonrpc: '2.0', id: 1, result })
+
+/** Extract the JSON-RPC method from a request body. */
+export const getMethod = (body: string): string => {
+  try {
+    return JSON.parse(body)?.method ?? ''
+  } catch {
+    return ''
+  }
+}
+
+/** Extract the slot from an eth_getStorageAt request body. */
+export const getStorageSlot = (body: string): string => {
+  try {
+    const parsed = JSON.parse(body)
+    return (parsed?.params?.[1] ?? '').toLowerCase()
+  } catch {
+    return ''
+  }
+}
 
 /** Extract the 4-byte selector from an eth_call request body. */
 export const getCalldata = (body: string): string => {

@@ -417,10 +417,10 @@ describe('createContractClient', () => {
     expect(result.deployedBytecode).toBeUndefined()
   })
 
-  // ── Diamond (ERC-2535) support ────────────────────────────────────────
+  // ── Proxy support (ERC-2535 diamond + EIP-1967 et al.) ────────────────
 
-  describe('diamond (ERC-2535)', () => {
-    it('detects via ERC-165 and returns composite ABI + facets', async () => {
+  describe('proxy', () => {
+    it('detects diamond via ERC-165 and returns composite ABI + targets', async () => {
       const facetsReturn = encodeFacets([
         { address: FACET_A, selectors: ['0xa9059cbb', '0x70a08231'] }, // transfer, balanceOf
         { address: FACET_B, selectors: ['0x18160ddd'] },               // totalSupply
@@ -477,11 +477,12 @@ describe('createContractClient', () => {
       })
 
       const result = await client.get(DIAMOND)
-      expect(result.facets).toHaveLength(2)
-      expect(result.facets?.[0].address).toBe(FACET_A)
-      expect(result.facets?.[0].selectors).toEqual(['0xa9059cbb', '0x70a08231'])
-      expect(result.facets?.[1].address).toBe(FACET_B)
-      expect(result.facets?.[1].selectors).toEqual(['0x18160ddd'])
+      expect(result.proxy?.pattern).toBe('eip-2535-diamond')
+      expect(result.proxy?.targets).toHaveLength(2)
+      expect(result.proxy?.targets[0].address).toBe(FACET_A)
+      expect(result.proxy?.targets[0].selectors).toEqual(['0xa9059cbb', '0x70a08231'])
+      expect(result.proxy?.targets[1].address).toBe(FACET_B)
+      expect(result.proxy?.targets[1].selectors).toEqual(['0x18160ddd'])
 
       // Composite ABI has all three functions
       const fnNames = (result.abi as any[]).filter(f => f.type === 'function').map(f => f.name).sort()
@@ -530,7 +531,7 @@ describe('createContractClient', () => {
       })
 
       const result = await client.get(DIAMOND)
-      expect(result.facets).toHaveLength(1)
+      expect(result.proxy?.targets).toHaveLength(1)
       expect((result.abi as any[])[0].name).toBe('totalSupply')
     })
 
@@ -561,7 +562,7 @@ describe('createContractClient', () => {
       })
 
       const result = await client.get(WETH)
-      expect(result.facets).toBeUndefined()
+      expect(result.proxy).toBeUndefined()
 
       // No facets() call should have been made
       const calls = (fetchFn as any).mock.calls
@@ -572,7 +573,7 @@ describe('createContractClient', () => {
       expect(facetsProbe).toBeUndefined()
     })
 
-    it('returns non-diamond result when both probes fail', async () => {
+    it('returns non-proxy result when all probes fail', async () => {
       const fetchFn = createMockFetch([
         {
           match: url => url.includes('sourcify'),
@@ -599,11 +600,11 @@ describe('createContractClient', () => {
       })
 
       const result = await client.get(WETH)
-      expect(result.facets).toBeUndefined()
+      expect(result.proxy).toBeUndefined()
       expect(result.abi).toEqual([{ type: 'function', name: 'foo', inputs: [] }])
     })
 
-    it('lists facet even when its Sourcify returns 404 (abi undefined)', async () => {
+    it('lists target even when its Sourcify returns 404 (abi undefined)', async () => {
       const facetsReturn = encodeFacets([
         { address: FACET_A, selectors: ['0x11111111', '0x22222222'] },
       ])
@@ -630,9 +631,9 @@ describe('createContractClient', () => {
       })
 
       const result = await client.get(DIAMOND)
-      expect(result.facets).toHaveLength(1)
-      expect(result.facets?.[0].selectors).toEqual(['0x11111111', '0x22222222'])
-      expect(result.facets?.[0].abi).toBeUndefined()
+      expect(result.proxy?.targets).toHaveLength(1)
+      expect(result.proxy?.targets[0].selectors).toEqual(['0x11111111', '0x22222222'])
+      expect(result.proxy?.targets[0].abi).toBeUndefined()
       expect(result.abi).toBeUndefined() // no ABI from anywhere
     })
 
@@ -674,11 +675,11 @@ describe('createContractClient', () => {
       })
 
       const result = await client.get(DIAMOND)
-      expect(result.facets).toHaveLength(1)
-      expect(result.facets?.[0].address).toBe(FACET_A)
+      expect(result.proxy?.targets).toHaveLength(1)
+      expect(result.proxy?.targets[0].address).toBe(FACET_A)
     })
 
-    it('makes no diamond probe calls when sources.diamond is false', async () => {
+    it('makes no on-chain probe calls when sources.proxy is false', async () => {
       const fetchFn = createMockFetch([
         {
           match: url => url.includes('sourcify'),
@@ -697,7 +698,7 @@ describe('createContractClient', () => {
         chainId: 1,
         rpc: 'https://rpc.test',
         fetch: fetchFn,
-        sources: { diamond: false, contractURI: false },
+        sources: { proxy: false, contractURI: false },
       })
 
       await client.get(WETH)
@@ -707,7 +708,7 @@ describe('createContractClient', () => {
       expect(rpcCall).toBeUndefined()
     })
 
-    it('does not recurse when a facet address itself appears to be a diamond', async () => {
+    it('does not recurse when a target address itself appears to be a proxy', async () => {
       // Facet A's Sourcify returns, but if we accidentally re-triggered diamond
       // detection, we would see extra RPC calls to FACET_A as the "to" address.
       const facetsReturn = encodeFacets([
@@ -842,21 +843,108 @@ describe('createContractClient', () => {
 
       const result = await client.get(DIAMOND)
 
-      // Facets still populated with addresses + selectors
-      expect(result.facets).toHaveLength(2)
-      expect(result.facets?.[0].abi).toBeUndefined()
-      expect(result.facets?.[1].abi).toBeUndefined()
+      // Targets still populated with addresses + selectors
+      expect(result.proxy?.targets).toHaveLength(2)
+      expect(result.proxy?.targets[0].abi).toBeUndefined()
+      expect(result.proxy?.targets[1].abi).toBeUndefined()
 
       // No Sourcify calls whatsoever
       const calls = (fetchFn as any).mock.calls.map((c: any) => c[0])
       expect(calls.some((url: string) => url.includes('sourcify'))).toBe(false)
     })
+
+    it('resolves an EIP-1967 proxy: repo metadata on proxy, ABI from implementation', async () => {
+      const PROXY = '0x2222222222222222222222222222222222222222'
+      const IMPL = '0x' + 'cc'.repeat(20)
+
+      const fetchFn = createMockFetch([
+        // Repository file authored against the PROXY address
+        {
+          match: url => url.includes('contract-metadata') && url.includes(PROXY),
+          response: {
+            status: 200,
+            body: {
+              chainId: 1,
+              address: PROXY,
+              name: 'My Upgradeable Token',
+              description: 'curated description',
+            },
+          },
+        },
+        // Sourcify on the proxy: not verified
+        {
+          match: url => url.includes('sourcify') && url.includes(PROXY),
+          response: { status: 404, body: null },
+        },
+        // Sourcify on the implementation: verified with ABI + NatSpec
+        {
+          match: url => url.includes('sourcify') && url.includes(IMPL),
+          response: {
+            status: 200,
+            body: {
+              abi: [
+                { type: 'function', name: 'totalSupply', inputs: [] },
+                { type: 'function', name: 'transfer', inputs: [{ type: 'address' }, { type: 'uint256' }] },
+              ],
+              userdoc: { methods: { 'transfer(address,uint256)': { notice: 'move tokens' } } },
+              devdoc: { methods: {} },
+            },
+          },
+        },
+        // Diamond probe returns false
+        {
+          match: (url, body) => url.includes('rpc.test')
+            && getCalldata(body).startsWith('0x01ffc9a7'),
+          response: { status: 200, body: rpcEnvelope(encodeBool(false)) },
+        },
+        // EIP-1967 impl slot is set
+        {
+          match: (url, body) =>
+            url.includes('rpc.test')
+            && body.includes('"method":"eth_getStorageAt"')
+            && body.toLowerCase().includes('0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc'),
+          response: { status: 200, body: rpcEnvelope('0x' + IMPL.replace(/^0x/, '').padStart(64, '0')) },
+        },
+        // EIP-1967 admin slot is empty
+        {
+          match: (url, body) =>
+            url.includes('rpc.test')
+            && body.includes('"method":"eth_getStorageAt"')
+            && body.toLowerCase().includes('0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103'),
+          response: { status: 200, body: rpcEnvelope('0x' + '00'.repeat(32)) },
+        },
+      ])
+
+      const client = createContractClient({
+        chainId: 1,
+        rpc: 'https://rpc.test',
+        fetch: fetchFn,
+      })
+
+      const result = await client.get(PROXY)
+
+      // Proxy info surfaces
+      expect(result.proxy?.pattern).toBe('eip-1967')
+      expect(result.proxy?.targets).toHaveLength(1)
+      expect(result.proxy?.targets[0].address).toBe(IMPL)
+      expect(result.proxy?.targets[0].selectors).toBeUndefined()
+
+      // Curated repo name wins at the metadata level
+      expect(result.metadata.name).toBe('My Upgradeable Token')
+
+      // ABI comes from the implementation
+      const fnNames = (result.abi as any[]).filter(f => f.type === 'function').map(f => f.name).sort()
+      expect(fnNames).toEqual(['totalSupply', 'transfer'])
+
+      // NatSpec comes from the implementation
+      expect(result.natspec?.userdoc).toBeTruthy()
+    })
   })
 
-  // ── client.fetchDiamond ──────────────────────────────────────────────
+  // ── client.fetchProxy ────────────────────────────────────────────────
 
-  describe('client.fetchDiamond', () => {
-    it('returns DiamondResolution with facets + composite ABI + natspec', async () => {
+  describe('client.fetchProxy', () => {
+    it('returns ProxyResolution with targets + composite ABI + natspec (diamond)', async () => {
       const facetsReturn = encodeFacets([
         { address: FACET_A, selectors: ['0xa9059cbb'] },  // transfer
         { address: FACET_B, selectors: ['0x18160ddd'] },  // totalSupply
@@ -905,23 +993,24 @@ describe('createContractClient', () => {
         fetch: fetchFn,
       })
 
-      const diamond = await client.fetchDiamond(DIAMOND)
-      expect(diamond).not.toBeNull()
-      expect(diamond!.facets).toHaveLength(2)
-      expect(diamond!.facets[0].address).toBe(FACET_A)
-      expect(diamond!.facets[0].abi).toBeTruthy()
-      expect(diamond!.facets[1].address).toBe(FACET_B)
+      const proxy = await client.fetchProxy(DIAMOND)
+      expect(proxy).not.toBeNull()
+      expect(proxy!.pattern).toBe('eip-2535-diamond')
+      expect(proxy!.targets).toHaveLength(2)
+      expect(proxy!.targets[0].address).toBe(FACET_A)
+      expect(proxy!.targets[0].abi).toBeTruthy()
+      expect(proxy!.targets[1].address).toBe(FACET_B)
 
-      // Composite ABI across facets
-      const fnNames = (diamond!.compositeAbi as any[])
+      // Composite ABI across targets
+      const fnNames = (proxy!.compositeAbi as any[])
         .filter(f => f.type === 'function').map(f => f.name).sort()
       expect(fnNames).toEqual(['totalSupply', 'transfer'])
 
-      // Facet NatSpec merged
-      expect(diamond!.natspec?.userdoc).toBeTruthy()
+      // Target NatSpec merged
+      expect(proxy!.natspec?.userdoc).toBeTruthy()
     })
 
-    it('returns null for non-diamonds', async () => {
+    it('returns null for non-proxies', async () => {
       const fetchFn = createMockFetch([
         {
           match: (url, body) => url.includes('rpc.test')
@@ -936,11 +1025,11 @@ describe('createContractClient', () => {
         fetch: fetchFn,
       })
 
-      const diamond = await client.fetchDiamond(WETH)
-      expect(diamond).toBeNull()
+      const proxy = await client.fetchProxy(WETH)
+      expect(proxy).toBeNull()
     })
 
-    it('skips per-facet Sourcify when options.sourcify is false', async () => {
+    it('skips per-target Sourcify when options.sourcify is false', async () => {
       const facetsReturn = encodeFacets([
         { address: FACET_A, selectors: ['0x18160ddd', '0xa9059cbb'] },
       ])
@@ -964,13 +1053,13 @@ describe('createContractClient', () => {
         fetch: fetchFn,
       })
 
-      const diamond = await client.fetchDiamond(DIAMOND, { sourcify: false })
-      expect(diamond).not.toBeNull()
-      expect(diamond!.facets).toHaveLength(1)
-      expect(diamond!.facets[0].selectors).toEqual(['0x18160ddd', '0xa9059cbb'])
-      expect(diamond!.facets[0].abi).toBeUndefined()
-      expect(diamond!.compositeAbi).toBeUndefined()
-      expect(diamond!.natspec).toBeUndefined()
+      const proxy = await client.fetchProxy(DIAMOND, { sourcify: false })
+      expect(proxy).not.toBeNull()
+      expect(proxy!.targets).toHaveLength(1)
+      expect(proxy!.targets[0].selectors).toEqual(['0x18160ddd', '0xa9059cbb'])
+      expect(proxy!.targets[0].abi).toBeUndefined()
+      expect(proxy!.compositeAbi).toBeUndefined()
+      expect(proxy!.natspec).toBeUndefined()
 
       const calls = (fetchFn as any).mock.calls.map((c: any) => c[0])
       expect(calls.some((url: string) => url.includes('sourcify'))).toBe(false)
@@ -984,8 +1073,8 @@ describe('createContractClient', () => {
         fetch: fetchFn,
       })
 
-      const diamond = await client.fetchDiamond(DIAMOND)
-      expect(diamond).toBeNull()
+      const proxy = await client.fetchProxy(DIAMOND)
+      expect(proxy).toBeNull()
 
       // No RPC calls made
       expect((fetchFn as any).mock.calls).toHaveLength(0)

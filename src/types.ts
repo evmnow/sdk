@@ -182,7 +182,7 @@ export interface SourceConfig {
   repository?: boolean
   contractURI?: boolean
   sourcify?: boolean
-  diamond?: boolean
+  proxy?: boolean
 }
 
 export interface IncludeFields {
@@ -222,7 +222,7 @@ export interface ContractResult {
   natspec?: NatSpec
   sources?: Record<string, string>
   deployedBytecode?: string
-  facets?: FacetInfo[]
+  proxy?: ProxyResolution
 }
 
 export interface NatSpec {
@@ -230,29 +230,36 @@ export interface NatSpec {
   devdoc?: Record<string, unknown>
 }
 
-export interface FacetInfo {
+export type { ProxyPattern, ResolvedTarget, RawProxy } from '@1001-digital/proxies'
+
+/** An implementation target behind a proxy, enriched with ABI + NatSpec. */
+export interface TargetInfo {
   address: string
-  selectors: string[]
+  /** Defined for diamond facets; undefined for single-impl proxies (all selectors). */
+  selectors?: string[]
   abi?: unknown[]
   natspec?: NatSpec
 }
 
-/** Raw on-chain facets() result: address + selectors per facet, no ABI. */
-export type { RawFacet } from '@1001-digital/diamonds'
-
-export interface DiamondResolution {
-  /** All live facets (zero-address entries filtered out). */
-  facets: FacetInfo[]
-  /** Composite ABI built from facet ABIs (first-wins dedup by selector). */
+export interface ProxyResolution {
+  /** Which proxy pattern was detected (diamond, 1967, beacon, …). */
+  pattern: import('@1001-digital/proxies').ProxyPattern
+  /** Resolved targets — one for every single-impl proxy pattern; N for diamonds. */
+  targets: TargetInfo[]
+  /** EIP-1967 beacon address (only for `eip-1967-beacon`). */
+  beacon?: string
+  /** EIP-1967 admin address (only for `eip-1967` when the admin slot is set). */
+  admin?: string
+  /** Composite ABI built from target ABIs (first-wins dedup by selector). */
   compositeAbi?: unknown[]
-  /** Merged NatSpec across facets (first-facet-wins per key). */
+  /** Merged NatSpec across targets (first-target-wins per key). */
   natspec?: NatSpec
-  /** Metadata layer (functions/events/errors) distilled from facet NatSpec, ready to merge. */
+  /** Metadata layer (functions/events/errors) distilled from target NatSpec, ready to merge. */
   metadataLayer?: Partial<ContractMetadataDocument>
 }
 
-export interface FetchDiamondOptions {
-  /** Fetch Sourcify for each facet to populate ABI + NatSpec. Default: true. */
+export interface FetchProxyOptions {
+  /** Fetch Sourcify for each target to populate ABI + NatSpec. Default: true. */
   sourcify?: boolean
 }
 
@@ -263,7 +270,7 @@ export interface ContractClient {
   fetchRepository: (address: string) => Promise<Partial<ContractMetadataDocument> | null>
   fetchContractURI: (address: string) => Promise<Partial<ContractMetadataDocument> | null>
   fetchSourcify: (address: string) => Promise<SourcifyResult | null>
-  fetchDiamond: (address: string, options?: FetchDiamondOptions) => Promise<DiamondResolution | null>
+  fetchProxy: (address: string, options?: FetchProxyOptions) => Promise<ProxyResolution | null>
 }
 
 export interface SourcifyResult {

@@ -3,11 +3,11 @@ import type {
   ContractClient,
   ContractMetadataDocument,
   ContractResult,
-  DiamondResolution,
-  FetchDiamondOptions,
+  FetchProxyOptions,
   GetOptions,
   IncludeFields,
-  RawFacet,
+  ProxyResolution,
+  RawProxy,
   SourcifyResult,
   SourceConfig,
 } from './types'
@@ -19,12 +19,12 @@ import { fetchContractURI as fetchUri } from './sources/contract-uri'
 import { fetchSourcify as fetchSrc, buildSourcifyLayer } from './sources/sourcify'
 import {
   buildCompositeAbi,
-  composeDiamondResolution,
-  detectAndFetchFacets,
-  enrichFacets,
-  fetchDiamond as fetchDiamondSource,
+  composeProxyResolution,
+  detectProxy,
+  enrichTargets,
+  fetchProxy as fetchProxySource,
   mergeNatspecDocs,
-} from './sources/diamond'
+} from './sources/proxy'
 
 const DEFAULT_SCHEMA_BASE =
   'https://raw.githubusercontent.com/evmnow/contract-metadata/refs/heads/main/schema'
@@ -113,15 +113,15 @@ export function createContractClient(config: ContractClientConfig): ContractClie
       ? fetchSourcifyWithFields(address, extraFields).catch(() => null)
       : Promise.resolve(null)
 
-    const diamondPromise: Promise<RawFacet[] | null> =
-      isEnabled(sources, 'diamond') && rpc
+    const proxyPromise: Promise<RawProxy | null> =
+      isEnabled(sources, 'proxy') && rpc
         ? ensureRpcChainId()
-            .then(() => detectAndFetchFacets(rpc, address, fetchFn))
+            .then(() => detectProxy(rpc, address, fetchFn))
             .catch(() => null)
         : Promise.resolve(null)
 
-    const [repoRaw, uriResult, srcResult, rawFacets] = await Promise.all([
-      repoPromise, uriPromise, srcPromise, diamondPromise,
+    const [repoRaw, uriResult, srcResult, rawProxy] = await Promise.all([
+      repoPromise, uriPromise, srcPromise, proxyPromise,
     ])
 
     let repoResult = repoRaw
@@ -136,7 +136,7 @@ export function createContractClient(config: ContractClientConfig): ContractClie
     // Merge: lowest priority first
     const merged = merge(sourcifyLayer, uriResult, repoResult)
 
-    if (Object.keys(merged).length === 0 && !srcResult?.abi && !rawFacets) {
+    if (Object.keys(merged).length === 0 && !srcResult?.abi && !rawProxy) {
       throw new ContractMetadataNotFoundError(chainId, address)
     }
 
@@ -153,48 +153,50 @@ export function createContractClient(config: ContractClientConfig): ContractClie
     if (srcResult?.sources) result.sources = srcResult.sources
     if (srcResult?.deployedBytecode) result.deployedBytecode = srcResult.deployedBytecode
 
-    if (rawFacets) {
-      await expandDiamond(
-        result, rawFacets, sourcifyEnabled, srcResult, sourcifyLayer, uriResult, repoResult,
+    if (rawProxy) {
+      await expandProxy(
+        result, rawProxy, sourcifyEnabled, srcResult, sourcifyLayer, uriResult, repoResult,
       )
     }
 
     return result
   }
 
-  async function expandDiamond(
+  async function expandProxy(
     result: ContractResult,
-    rawFacets: RawFacet[],
+    rawProxy: RawProxy,
     sourcifyEnabled: boolean,
     srcResult: SourcifyResult | null,
     sourcifyLayer: Partial<ContractMetadataDocument> | null,
     uriResult: Partial<ContractMetadataDocument> | null,
     repoResult: Partial<ContractMetadataDocument> | null,
   ): Promise<void> {
-    // Fetch Sourcify directly per facet (not through client.get) — this is
-    // the structural recursion guard against facets that themselves look like
-    // diamonds. Skipped entirely when Sourcify is disabled.
+    // Fetch Sourcify directly per target (not through client.get) — this is
+    // the structural single-hop guard. Skipped entirely when Sourcify is disabled.
     const sourcifyFetch = sourcifyEnabled
       ? (a: string) => fetchSrc(chainId, a, fetchFn, sourcifyUrl)
       : null
 
-    const { facets, sourcifyResults } = await enrichFacets(rawFacets, sourcifyFetch)
-    const derived = composeDiamondResolution(facets, sourcifyResults)
+    const { targets, sourcifyResults } = await enrichTargets(rawProxy.targets, sourcifyFetch)
+    const derived = composeProxyResolution(targets, sourcifyResults)
 
-    result.facets = facets
+    const proxy: ProxyResolution = { pattern: rawProxy.pattern, targets, ...derived }
+    if (rawProxy.beacon) proxy.beacon = rawProxy.beacon
+    if (rawProxy.admin) proxy.admin = rawProxy.admin
+    result.proxy = proxy
 
-    // Composite ABI: main diamond first (it may legitimately mount Loupe + admin
-    // functions itself), then each facet's filtered ABI. First-occurrence wins.
-    // When the diamond itself isn't verified, reuse the facet-only composite.
+    // Composite ABI: main contract first (it may legitimately mount admin/loupe
+    // functions itself), then each target's filtered ABI. First-occurrence wins.
+    // When the main contract isn't verified, reuse the target-only composite.
     if (srcResult?.abi) {
       const layers: unknown[][] = [srcResult.abi]
-      for (const f of facets) if (f.abi) layers.push(f.abi)
+      for (const t of targets) if (t.abi) layers.push(t.abi)
       result.abi = buildCompositeAbi(layers)
     } else if (derived.compositeAbi) {
       result.abi = derived.compositeAbi
     }
 
-    // Re-merge metadata with facet natspec layer at lowest priority so curated
+    // Re-merge metadata with target layer at lowest priority so curated
     // repo/contractURI/main-sourcify docs still win.
     if (derived.metadataLayer) {
       const rebuilt = merge(derived.metadataLayer, sourcifyLayer, uriResult, repoResult)
@@ -203,7 +205,7 @@ export function createContractClient(config: ContractClientConfig): ContractClie
       } as ContractMetadataDocument
     }
 
-    // NatSpec: main diamond first (highest authority), then merged facet natspec.
+    // NatSpec: main contract first (highest authority), then merged target natspec.
     const userdocMerged = mergeNatspecDocs(srcResult?.userdoc, derived.natspec?.userdoc)
     const devdocMerged = mergeNatspecDocs(srcResult?.devdoc, derived.natspec?.devdoc)
     if (userdocMerged || devdocMerged) {
@@ -238,19 +240,19 @@ export function createContractClient(config: ContractClientConfig): ContractClie
     return fetchSrc(chainId, address, fetchFn, sourcifyUrl, ['sources', 'deployedBytecode'])
   }
 
-  async function fetchDiamond(
+  async function fetchProxy(
     address: string,
-    options?: FetchDiamondOptions,
-  ): Promise<DiamondResolution | null> {
+    options?: FetchProxyOptions,
+  ): Promise<ProxyResolution | null> {
     if (!rpc) return null
     await ensureRpcChainId()
-    return fetchDiamondSource(rpc, chainId, address, fetchFn, {
+    return fetchProxySource(rpc, chainId, address, fetchFn, {
       sourcifyUrl,
       sourcify: options?.sourcify,
     })
   }
 
-  return { get, fetchRepository, fetchContractURI, fetchSourcify, fetchDiamond }
+  return { get, fetchRepository, fetchContractURI, fetchSourcify, fetchProxy }
 }
 
 // ── Re-exports ──
@@ -258,12 +260,19 @@ export function createContractClient(config: ContractClientConfig): ContractClie
 // Pure merge utilities
 export { merge, resolveIncludes } from './merge'
 
-// Diamond utilities
+// Proxy utilities
 export {
-  fetchDiamond,
-  detectAndFetchFacets,
-  enrichFacets,
-  composeDiamondResolution,
+  fetchProxy,
+  detectProxy,
+  detectDiamond,
+  detectEip1967,
+  detectEip1967Beacon,
+  detectEip1822,
+  detectEip1167,
+  detectGnosisSafe,
+  detectEip897,
+  enrichTargets,
+  composeProxyResolution,
   decodeFacets,
   computeSelector,
   canonicalSignature,
@@ -273,7 +282,12 @@ export {
   DIAMOND_LOUPE_INTERFACE_ID,
   SUPPORTS_INTERFACE_SELECTOR,
   FACETS_SELECTOR,
-} from './sources/diamond'
+  IMPLEMENTATION_SELECTOR,
+  EIP1967_IMPL_SLOT,
+  EIP1967_BEACON_SLOT,
+  EIP1967_ADMIN_SLOT,
+  EIP1822_PROXIABLE_SLOT,
+} from './sources/proxy'
 
 // Per-source fetchers
 export { fetchRepository } from './sources/repository'
@@ -305,13 +319,15 @@ export type {
   ContractClientConfig,
   ContractClient,
   ContractResult,
-  DiamondResolution,
-  FacetInfo,
-  FetchDiamondOptions,
+  ProxyResolution,
+  ProxyPattern,
+  TargetInfo,
+  RawProxy,
+  ResolvedTarget,
+  FetchProxyOptions,
   NatSpec,
   GetOptions,
   IncludeFields,
-  RawFacet,
   SourceConfig,
   SourcifyResult,
   DocumentMeta,
