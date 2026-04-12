@@ -250,6 +250,9 @@ import {
   filterAbiBySelectors,
   buildCompositeAbi,
   mergeNatspecDocs,
+  DIAMOND_LOUPE_INTERFACE_ID,
+  SUPPORTS_INTERFACE_SELECTOR,
+  FACETS_SELECTOR,
 } from '@evmnow/sdk/sources/diamond'
 import {
   ContractMetadataError,

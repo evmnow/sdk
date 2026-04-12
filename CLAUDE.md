@@ -10,7 +10,7 @@ Contract Metadata SDK (`@evmnow/sdk`) — resolve complete contract metadata fro
 ## Structure
 
 - `src/` — Source code
-- `src/index.ts` — Factory (`createContractClient`) + barrel exports + diamond expansion
+- `src/index.ts` — Factory (`createContractClient`) + barrel exports. Owns the client-level composition step that layers main-contract Sourcify data on top of the facet-only `DiamondResolution`.
 - `src/types.ts` — Public types (config, client, document, schema-aligned)
 - `src/errors.ts` — Error classes
 - `src/merge.ts` — Pure merge logic (source priority + includes resolution)
