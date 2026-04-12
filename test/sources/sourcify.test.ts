@@ -33,7 +33,6 @@ describe('fetchSourcify', () => {
     const result = await fetchSourcify(chainId, address, fetchFn, 'https://sourcify.test')
 
     expect(result).toBeTruthy()
-    expect(result!.name).toBe('WETH9')
     expect(result!.abi).toEqual([{ type: 'function', name: 'deposit' }])
     expect(result!.functions?.deposit).toBeTruthy()
     expect(result!.functions?.deposit?.description).toBe('Deposit ETH to get WETH')
@@ -72,7 +71,7 @@ describe('fetchSourcify', () => {
     await fetchSourcify(chainId, address, fetchFn, 'https://sourcify.test')
 
     expect(fetchFn).toHaveBeenCalledWith(
-      `https://sourcify.test/v2/contract/${chainId}/${address}?fields=abi,name,userdoc,devdoc`,
+      `https://sourcify.test/v2/contract/${chainId}/${address}?fields=abi,userdoc,devdoc`,
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     )
   })
@@ -83,7 +82,7 @@ describe('fetchSourcify', () => {
     await fetchSourcify(chainId, address, fetchFn, 'https://sourcify.test', ['deployedBytecode', 'sources'])
 
     expect(fetchFn).toHaveBeenCalledWith(
-      `https://sourcify.test/v2/contract/${chainId}/${address}?fields=abi,name,userdoc,devdoc,deployedBytecode,sources`,
+      `https://sourcify.test/v2/contract/${chainId}/${address}?fields=abi,userdoc,devdoc,deployedBytecode,sources`,
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     )
   })

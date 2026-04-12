@@ -10,7 +10,6 @@ interface SourcifySource {
 }
 
 interface SourcifyResponse {
-  name?: string
   abi?: unknown[]
   userdoc?: SourcifyUserDoc
   devdoc?: SourcifyDevDoc
@@ -18,7 +17,7 @@ interface SourcifyResponse {
   sources?: Record<string, SourcifySource>
 }
 
-const BASE_FIELDS = 'abi,name,userdoc,devdoc'
+const BASE_FIELDS = 'abi,userdoc,devdoc'
 
 export async function fetchSourcify(
   chainId: number,
@@ -66,7 +65,6 @@ export async function fetchSourcify(
   const result: SourcifyResult = {}
 
   if (data.abi) result.abi = data.abi
-  if (data.name) result.name = data.name
   if (data.userdoc) result.userdoc = data.userdoc as Record<string, unknown>
   if (data.devdoc) result.devdoc = data.devdoc as Record<string, unknown>
   if (data.deployedBytecode) result.deployedBytecode = data.deployedBytecode

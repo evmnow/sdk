@@ -39,7 +39,7 @@ The SDK fetches metadata from three sources in parallel, then merges them with i
 
 | Priority | Source | What it provides |
 |----------|--------|-----------------|
-| Lowest | **Sourcify** | Contract name, function/event/error descriptions from NatSpec comments |
+| Lowest | **Sourcify** | ABI and function/event/error descriptions from NatSpec comments |
 | Medium | **contractURI** | On-chain ERC-7572 fields: name, symbol, description, image, links |
 | Highest | **Repository** | Curated JSON from the [evmnow/contract-metadata](https://github.com/evmnow/contract-metadata) repo — full control over every field |
 

@@ -233,7 +233,6 @@ export interface ContractClient {
 
 export interface SourcifyResult {
   abi?: unknown[]
-  name?: string
   userdoc?: Record<string, unknown>
   devdoc?: Record<string, unknown>
   sources?: Record<string, string>

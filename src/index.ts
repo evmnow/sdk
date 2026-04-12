@@ -96,7 +96,7 @@ export function createContractClient(config: ContractClientConfig): ContractClie
     // Merge: lowest priority first
     const merged = merge(sourcifyLayer, uriResult, repoResult)
 
-    if (Object.keys(merged).length === 0) {
+    if (Object.keys(merged).length === 0 && !srcResult?.abi) {
       throw new ContractMetadataNotFoundError(chainId, address)
     }
 
@@ -147,8 +147,6 @@ export function createContractClient(config: ContractClientConfig): ContractClie
 
 function buildSourcifyLayer(src: SourcifyResult): Partial<ContractMetadataDocument> | null {
   const layer: Partial<ContractMetadataDocument> = {}
-
-  if (src.name) layer.name = src.name
   if (src.functions) layer.functions = src.functions
   if (src.events) layer.events = src.events
   if (src.errors) layer.errors = src.errors

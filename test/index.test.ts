@@ -158,7 +158,7 @@ describe('createContractClient', () => {
     })
 
     const result = await client.get(WETH)
-    expect(result.metadata.name).toBe('WETH9')
+    expect(result.metadata.name).toBeUndefined()
     expect(result.chainId).toBe(1)
     expect(result.address).toBe(WETH)
     expect(result.abi).toEqual([{ type: 'function', name: 'deposit' }])
@@ -202,7 +202,7 @@ describe('createContractClient', () => {
   it('allows per-call source overrides', async () => {
     const repoMetadata = { name: 'From Repo' }
     const sourcifyResponse = {
-      name: 'From Sourcify',
+      abi: [{ type: 'function', name: 'deposit' }],
       userdoc: { methods: {} },
       devdoc: { methods: {} },
     }
@@ -225,7 +225,8 @@ describe('createContractClient', () => {
 
     // Disable repository for this call
     const result = await client.get(WETH, { sources: { repository: false } })
-    expect(result.metadata.name).toBe('From Sourcify')
+    expect(result.metadata.name).toBeUndefined()
+    expect(result.abi).toEqual([{ type: 'function', name: 'deposit' }])
   })
 
   it('skips contractURI when no rpc configured', async () => {
