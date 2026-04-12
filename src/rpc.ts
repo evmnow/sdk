@@ -66,7 +66,7 @@ export async function resolveEns(
   const addrCalldata = ADDR_SELECTOR + node.slice(2)
 
   const dnsNameBytes = hexToBytes(dnsName)
-  const addrCalldataBytes = hexToBytes('0x' + addrCalldata)
+  const addrCalldataBytes = hexToBytes(addrCalldata)
 
   const data = RESOLVE_SELECTOR + abiEncodeBytes2(dnsNameBytes, addrCalldataBytes)
 

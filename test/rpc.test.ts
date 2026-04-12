@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
-import { ethCall, decodeAbiString } from '../src/rpc'
+import { ethCall, decodeAbiString, resolveEns } from '../src/rpc'
+import { namehash } from '../src/ens'
 
 function mockFetch(result: unknown) {
   return vi.fn().mockResolvedValue({
@@ -7,6 +8,26 @@ function mockFetch(result: unknown) {
     json: () => Promise.resolve({ jsonrpc: '2.0', id: 1, result }),
   }) as unknown as typeof fetch
 }
+
+describe('resolveEns', () => {
+  it('encodes addr(bytes32) calldata without a duplicated 0x prefix', async () => {
+    const fetchFn = mockFetch(
+      '0x'
+      + '0000000000000000000000000000000000000000000000000000000000000020'
+      + '0000000000000000000000000000000000000000000000000000000000000020'
+      + '000000000000000000000000'
+      + 'c0'.repeat(20),
+    )
+
+    const address = await resolveEns('https://rpc.test', 'vitalik.eth', fetchFn)
+
+    expect(address).toBe('0x' + 'c0'.repeat(20))
+
+    const body = JSON.parse((fetchFn as any).mock.calls[0][1].body)
+    const calldata = body.params[0].data
+    expect(calldata).toContain('3b3b57de' + namehash('vitalik.eth').slice(2))
+  })
+})
 
 describe('ethCall', () => {
   it('sends a JSON-RPC eth_call request', async () => {
