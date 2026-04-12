@@ -7,47 +7,12 @@ import {
   getCalldata,
   getCallTo,
 } from './helpers/abi'
+import { createMockFetch } from './helpers/mock-fetch'
 
 const WETH = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2'
 const DIAMOND = '0x1111111111111111111111111111111111111111'
 const FACET_A = '0x' + 'aa'.repeat(20)
 const FACET_B = '0x' + 'bb'.repeat(20)
-
-type MockRoute = {
-  match: (url: string, body: string) => boolean
-  response: { status: number; body: unknown }
-}
-
-function createMockFetch(routes: MockRoute[], chainIdHex = '0x1') {
-  return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = typeof input === 'string' ? input : input.toString()
-    const body = typeof init?.body === 'string' ? init.body : ''
-
-    for (const route of routes) {
-      if (route.match(url, body)) {
-        return {
-          ok: route.response.status >= 200 && route.response.status < 300,
-          status: route.response.status,
-          json: () => Promise.resolve(route.response.body),
-          text: () => Promise.resolve(JSON.stringify(route.response.body)),
-        }
-      }
-    }
-
-    // Implicit default: respond to eth_chainId so factory validation passes.
-    // Tests that want to assert mismatch behavior should add their own
-    // higher-priority eth_chainId route.
-    if (body.includes('"method":"eth_chainId"')) {
-      return {
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve({ jsonrpc: '2.0', id: 1, result: chainIdHex }),
-      }
-    }
-
-    return { ok: false, status: 404, json: () => Promise.resolve(null) }
-  }) as unknown as typeof fetch
-}
 
 describe('createContractClient', () => {
   let originalFetch: typeof globalThis.fetch
@@ -845,6 +810,185 @@ describe('createContractClient', () => {
       const result = await client.get(DIAMOND)
       const fns = (result.abi as any[]).filter(f => f.type === 'function')
       expect(fns).toHaveLength(1)
+    })
+
+    it('does not fetch facet Sourcify when sources.sourcify is false', async () => {
+      // Main goal: a diamond client configured without Sourcify should still
+      // return facets + selectors, but MUST NOT hit Sourcify for any facet.
+      const facetsReturn = encodeFacets([
+        { address: FACET_A, selectors: ['0x18160ddd'] },
+        { address: FACET_B, selectors: ['0xa9059cbb'] },
+      ])
+
+      const fetchFn = createMockFetch([
+        {
+          match: (url, body) => url.includes('rpc.test')
+            && getCalldata(body).startsWith('0x01ffc9a7'),
+          response: { status: 200, body: rpcEnvelope(encodeBool(true)) },
+        },
+        {
+          match: (url, body) => url.includes('rpc.test')
+            && getCalldata(body).startsWith('0x7a0ed627'),
+          response: { status: 200, body: rpcEnvelope(facetsReturn) },
+        },
+      ])
+
+      const client = createContractClient({
+        chainId: 1,
+        rpc: 'https://rpc.test',
+        fetch: fetchFn,
+        sources: { sourcify: false, contractURI: false },
+      })
+
+      const result = await client.get(DIAMOND)
+
+      // Facets still populated with addresses + selectors
+      expect(result.facets).toHaveLength(2)
+      expect(result.facets?.[0].abi).toBeUndefined()
+      expect(result.facets?.[1].abi).toBeUndefined()
+
+      // No Sourcify calls whatsoever
+      const calls = (fetchFn as any).mock.calls.map((c: any) => c[0])
+      expect(calls.some((url: string) => url.includes('sourcify'))).toBe(false)
+    })
+  })
+
+  // ── client.fetchDiamond ──────────────────────────────────────────────
+
+  describe('client.fetchDiamond', () => {
+    it('returns DiamondResolution with facets + composite ABI + natspec', async () => {
+      const facetsReturn = encodeFacets([
+        { address: FACET_A, selectors: ['0xa9059cbb'] },  // transfer
+        { address: FACET_B, selectors: ['0x18160ddd'] },  // totalSupply
+      ])
+
+      const fetchFn = createMockFetch([
+        {
+          match: url => url.includes(FACET_A),
+          response: {
+            status: 200,
+            body: {
+              abi: [
+                { type: 'function', name: 'transfer', inputs: [{ type: 'address' }, { type: 'uint256' }] },
+              ],
+              userdoc: { methods: { 'transfer(address,uint256)': { notice: 'move tokens' } } },
+              devdoc: { methods: {} },
+            },
+          },
+        },
+        {
+          match: url => url.includes(FACET_B),
+          response: {
+            status: 200,
+            body: {
+              abi: [{ type: 'function', name: 'totalSupply', inputs: [] }],
+              userdoc: { methods: { 'totalSupply()': { notice: 'total supply' } } },
+              devdoc: { methods: {} },
+            },
+          },
+        },
+        {
+          match: (url, body) => url.includes('rpc.test')
+            && getCalldata(body).startsWith('0x01ffc9a7'),
+          response: { status: 200, body: rpcEnvelope(encodeBool(true)) },
+        },
+        {
+          match: (url, body) => url.includes('rpc.test')
+            && getCalldata(body).startsWith('0x7a0ed627'),
+          response: { status: 200, body: rpcEnvelope(facetsReturn) },
+        },
+      ])
+
+      const client = createContractClient({
+        chainId: 1,
+        rpc: 'https://rpc.test',
+        fetch: fetchFn,
+      })
+
+      const diamond = await client.fetchDiamond(DIAMOND)
+      expect(diamond).not.toBeNull()
+      expect(diamond!.facets).toHaveLength(2)
+      expect(diamond!.facets[0].address).toBe(FACET_A)
+      expect(diamond!.facets[0].abi).toBeTruthy()
+      expect(diamond!.facets[1].address).toBe(FACET_B)
+
+      // Composite ABI across facets
+      const fnNames = (diamond!.compositeAbi as any[])
+        .filter(f => f.type === 'function').map(f => f.name).sort()
+      expect(fnNames).toEqual(['totalSupply', 'transfer'])
+
+      // Facet NatSpec merged
+      expect(diamond!.natspec?.userdoc).toBeTruthy()
+    })
+
+    it('returns null for non-diamonds', async () => {
+      const fetchFn = createMockFetch([
+        {
+          match: (url, body) => url.includes('rpc.test')
+            && getCalldata(body).startsWith('0x01ffc9a7'),
+          response: { status: 200, body: rpcEnvelope(encodeBool(false)) },
+        },
+      ])
+
+      const client = createContractClient({
+        chainId: 1,
+        rpc: 'https://rpc.test',
+        fetch: fetchFn,
+      })
+
+      const diamond = await client.fetchDiamond(WETH)
+      expect(diamond).toBeNull()
+    })
+
+    it('skips per-facet Sourcify when options.sourcify is false', async () => {
+      const facetsReturn = encodeFacets([
+        { address: FACET_A, selectors: ['0x18160ddd', '0xa9059cbb'] },
+      ])
+
+      const fetchFn = createMockFetch([
+        {
+          match: (url, body) => url.includes('rpc.test')
+            && getCalldata(body).startsWith('0x01ffc9a7'),
+          response: { status: 200, body: rpcEnvelope(encodeBool(true)) },
+        },
+        {
+          match: (url, body) => url.includes('rpc.test')
+            && getCalldata(body).startsWith('0x7a0ed627'),
+          response: { status: 200, body: rpcEnvelope(facetsReturn) },
+        },
+      ])
+
+      const client = createContractClient({
+        chainId: 1,
+        rpc: 'https://rpc.test',
+        fetch: fetchFn,
+      })
+
+      const diamond = await client.fetchDiamond(DIAMOND, { sourcify: false })
+      expect(diamond).not.toBeNull()
+      expect(diamond!.facets).toHaveLength(1)
+      expect(diamond!.facets[0].selectors).toEqual(['0x18160ddd', '0xa9059cbb'])
+      expect(diamond!.facets[0].abi).toBeUndefined()
+      expect(diamond!.compositeAbi).toBeUndefined()
+      expect(diamond!.natspec).toBeUndefined()
+
+      const calls = (fetchFn as any).mock.calls.map((c: any) => c[0])
+      expect(calls.some((url: string) => url.includes('sourcify'))).toBe(false)
+    })
+
+    it('returns null when no rpc configured', async () => {
+      const fetchFn = createMockFetch([])
+
+      const client = createContractClient({
+        chainId: 1,
+        fetch: fetchFn,
+      })
+
+      const diamond = await client.fetchDiamond(DIAMOND)
+      expect(diamond).toBeNull()
+
+      // No RPC calls made
+      expect((fetchFn as any).mock.calls).toHaveLength(0)
     })
   })
 })

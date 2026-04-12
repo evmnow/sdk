@@ -25,11 +25,20 @@ Contract Metadata SDK (`@evmnow/sdk`) — resolve complete contract metadata fro
 
 ## Key patterns
 
-- Vite build step — outputs JS + `.d.ts` to `dist/`, source TS published alongside for editor navigation
-- Factory pattern — `createContractClient(config)` returns a `ContractClient`
-- Pure functions — `merge` exported directly for standalone use
+- Vite build with `preserveModules: true` mirrors `src/` → `dist/` 1:1 — each module is an independently importable subpath under `@evmnow/sdk/...` (declared in `package.json#exports`)
+- `sideEffects: false` in package.json — enables aggressive tree-shaking
+- Factory pattern — `createContractClient(config)` returns a `ContractClient` with `get`, `fetchRepository`, `fetchContractURI`, `fetchSourcify`, `fetchDiamond`
+- Pure/standalone exports — `merge`, `resolveIncludes`, `decodeFacets`, `computeSelector`, `canonicalSignature`, `filterAbiBySelectors`, `buildCompositeAbi`, `mergeNatspecDocs`, `enrichFacets`, `composeDiamondResolution`, and each source's `fetchX` are all usable without the client
 - Minimal runtime dependencies — `@noble/hashes` (keccak256) + `@1001-digital/natspec` (parse only)
 - Uses natspec as a parsing library only (pure `parse` + `toMetadata` functions, not its fetch client)
+
+## Diamond pipeline
+
+- `detectAndFetchFacets` — on-chain probe, returns `RawFacet[] | null`
+- `enrichFacets(rawFacets, sourcifyFetch)` — dependency-injected fetcher (pass `null` to skip Sourcify). Returns enriched `FacetInfo[]` plus the raw `SourcifyResult[]` so callers can build their own derived layers
+- `composeDiamondResolution` — pure; builds `compositeAbi`, `metadataLayer`, and merged `natspec` from `enrichFacets` output
+- `fetchDiamond` — high-level: detect → enrich → compose in one call
+- `sources.sourcify: false` on the client disables per-facet Sourcify lookups as well — no hidden traffic
 
 ## Testing
 

@@ -136,6 +136,26 @@ Fetch only the on-chain contractURI. Returns `null` if not found or no RPC confi
 
 Fetch only from Sourcify. Always requests `sources` and `deployedBytecode` alongside the base fields, and returns the raw `SourcifyResult` (ABI, parsed NatSpec, sources, bytecode).
 
+### `client.fetchDiamond(address, options?)`
+
+Resolve ERC-2535 Diamond facets for an address without running the full merge pipeline. Returns `null` if the contract is not a diamond or no RPC is configured; otherwise returns a `DiamondResolution`:
+
+```ts
+interface DiamondResolution {
+  facets: FacetInfo[]         // address + selectors, plus ABI / NatSpec when Sourcify is enabled
+  compositeAbi?: unknown[]    // deduped ABI across every facet
+  natspec?: NatSpec           // merged userdoc/devdoc across facets
+  metadataLayer?: Partial<ContractMetadataDocument>  // functions/events/errors ready to merge
+}
+```
+
+Per-facet Sourcify lookups can be skipped when you only need the topology:
+
+```ts
+// Addresses + selectors only — no Sourcify traffic
+const diamond = await client.fetchDiamond('0x...', { sourcify: false })
+```
+
 ### `merge(...layers)`
 
 Standalone pure function for merging metadata layers. Exported for use outside the client.
@@ -205,7 +225,59 @@ When the `diamond` source is enabled and an `rpc` is configured, the SDK detects
 - `result.natspec` — `userdoc` / `devdoc` merged across the diamond and its facets, main doc taking priority
 - `result.metadata.functions` / `events` / `errors` — NatSpec-derived sections from every facet layered in at lowest priority, so curated repo/contractURI/main-Sourcify fields still win
 
-Facets are fetched directly from Sourcify (not recursively through `client.get`), which guards against facets that themselves look like diamonds.
+Facets are fetched directly from Sourcify (not recursively through `client.get`), which guards against facets that themselves look like diamonds. Setting `sources.sourcify: false` skips per-facet Sourcify traffic as well — the facets list still contains addresses and selectors, but `abi` and `natspec` are omitted.
+
+## Modular imports
+
+Every module is published as a subpath export, so consumers can import a single utility without the full barrel:
+
+```ts
+import { merge, resolveIncludes } from '@evmnow/sdk/merge'
+import { resolveUri } from '@evmnow/sdk/uri'
+import { namehash, dnsEncode } from '@evmnow/sdk/ens'
+import { ethCall, resolveEns, getChainId, decodeAbiString } from '@evmnow/sdk/rpc'
+import { fetchRepository } from '@evmnow/sdk/sources/repository'
+import { fetchContractURI } from '@evmnow/sdk/sources/contract-uri'
+import { fetchSourcify, buildSourcifyLayer } from '@evmnow/sdk/sources/sourcify'
+import {
+  fetchDiamond,
+  detectAndFetchFacets,
+  enrichFacets,
+  composeDiamondResolution,
+  decodeFacets,
+  computeSelector,
+  canonicalSignature,
+  filterAbiBySelectors,
+  buildCompositeAbi,
+  mergeNatspecDocs,
+} from '@evmnow/sdk/sources/diamond'
+import {
+  ContractMetadataError,
+  ContractMetadataNotFoundError,
+  ContractMetadataFetchError,
+  ENSResolutionError,
+} from '@evmnow/sdk/errors'
+```
+
+Every symbol above is also re-exported from the barrel (`@evmnow/sdk`).
+
+### Standalone diamond resolution
+
+When you only need facet info for an ERC-2535 diamond, skip the client entirely:
+
+```ts
+import { fetchDiamond } from '@evmnow/sdk/sources/diamond'
+
+const diamond = await fetchDiamond(
+  'https://eth.llamarpc.com',   // rpc
+  1,                            // chainId
+  '0x...',                      // diamond address
+  fetch,                        // fetch implementation
+  { sourcifyUrl: 'https://sourcify.dev/server', sourcify: true },
+)
+```
+
+Pass `{ sourcify: false }` to return only the on-chain address + selector topology.
 
 ## Error handling
 

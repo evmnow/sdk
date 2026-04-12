@@ -237,6 +237,28 @@ export interface FacetInfo {
   natspec?: NatSpec
 }
 
+/** Raw on-chain facets() result: address + selectors per facet, no ABI. */
+export interface RawFacet {
+  facetAddress: string
+  functionSelectors: string[]
+}
+
+export interface DiamondResolution {
+  /** All live facets (zero-address entries filtered out). */
+  facets: FacetInfo[]
+  /** Composite ABI built from facet ABIs (first-wins dedup by selector). */
+  compositeAbi?: unknown[]
+  /** Merged NatSpec across facets (first-facet-wins per key). */
+  natspec?: NatSpec
+  /** Metadata layer (functions/events/errors) distilled from facet NatSpec, ready to merge. */
+  metadataLayer?: Partial<ContractMetadataDocument>
+}
+
+export interface FetchDiamondOptions {
+  /** Fetch Sourcify for each facet to populate ABI + NatSpec. Default: true. */
+  sourcify?: boolean
+}
+
 // ── Client ──
 
 export interface ContractClient {
@@ -244,6 +266,7 @@ export interface ContractClient {
   fetchRepository: (address: string) => Promise<Partial<ContractMetadataDocument> | null>
   fetchContractURI: (address: string) => Promise<Partial<ContractMetadataDocument> | null>
   fetchSourcify: (address: string) => Promise<SourcifyResult | null>
+  fetchDiamond: (address: string, options?: FetchDiamondOptions) => Promise<DiamondResolution | null>
 }
 
 export interface SourcifyResult {

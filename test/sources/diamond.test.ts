@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   decodeFacets,
   computeSelector,
@@ -6,11 +6,24 @@ import {
   filterAbiBySelectors,
   buildCompositeAbi,
   mergeNatspecDocs,
+  enrichFacets,
+  composeDiamondResolution,
+  fetchDiamond,
   FACETS_SELECTOR,
   SUPPORTS_INTERFACE_SELECTOR,
   DIAMOND_LOUPE_INTERFACE_ID,
 } from '../../src/sources/diamond'
-import { word as w, selSlot as selWord, blob } from '../helpers/abi'
+import type { RawFacet, SourcifyResult } from '../../src/types'
+import {
+  word as w,
+  selSlot as selWord,
+  blob,
+  encodeFacets,
+  encodeBool,
+  rpcEnvelope,
+  getCalldata,
+} from '../helpers/abi'
+import { createMockFetch } from '../helpers/mock-fetch'
 
 describe('constants', () => {
   it('has the canonical ERC-2535 selectors', () => {
@@ -254,5 +267,188 @@ describe('mergeNatspecDocs', () => {
     const a = { notice: 'A wins' }
     const b = { notice: 'B loses', details: 'B fills in' }
     expect(mergeNatspecDocs(a, b)).toEqual({ notice: 'A wins', details: 'B fills in' })
+  })
+})
+
+describe('enrichFacets', () => {
+  const rawFacets: RawFacet[] = [
+    { facetAddress: '0x' + 'aa'.repeat(20), functionSelectors: ['0xa9059cbb'] },   // transfer
+    { facetAddress: '0x' + 'bb'.repeat(20), functionSelectors: ['0x18160ddd'] },   // totalSupply
+  ]
+
+  it('returns address-only FacetInfo when sourcifyFetch is null', async () => {
+    const { facets, sourcifyResults } = await enrichFacets(rawFacets, null)
+    expect(facets).toHaveLength(2)
+    expect(facets[0].address).toBe('0x' + 'aa'.repeat(20))
+    expect(facets[0].selectors).toEqual(['0xa9059cbb'])
+    expect(facets[0].abi).toBeUndefined()
+    expect(facets[0].natspec).toBeUndefined()
+    expect(sourcifyResults).toEqual([null, null])
+  })
+
+  it('populates ABI (filtered) and NatSpec when sourcifyFetch returns data', async () => {
+    const sourcifyFetch = vi.fn(async (addr: string): Promise<SourcifyResult | null> => {
+      if (addr === '0x' + 'aa'.repeat(20)) {
+        return {
+          abi: [
+            { type: 'function', name: 'transfer', inputs: [{ type: 'address' }, { type: 'uint256' }] },
+            // Will be filtered out — not in the facet's selector list
+            { type: 'function', name: 'approve', inputs: [{ type: 'address' }, { type: 'uint256' }] },
+          ],
+          userdoc: { methods: { 'transfer(address,uint256)': { notice: 'moves tokens' } } },
+          devdoc: { methods: {} },
+        }
+      }
+      return null
+    })
+
+    const { facets } = await enrichFacets(rawFacets, sourcifyFetch)
+    expect(sourcifyFetch).toHaveBeenCalledTimes(2)
+
+    expect(facets[0].abi).toHaveLength(1)
+    expect((facets[0].abi as any)[0].name).toBe('transfer')
+    expect(facets[0].natspec?.userdoc).toBeTruthy()
+
+    expect(facets[1].abi).toBeUndefined()
+    expect(facets[1].natspec).toBeUndefined()
+  })
+
+  it('swallows per-facet sourcify errors', async () => {
+    const sourcifyFetch = vi.fn(async () => {
+      throw new Error('network boom')
+    })
+
+    const { facets, sourcifyResults } = await enrichFacets(rawFacets, sourcifyFetch)
+    expect(facets).toHaveLength(2)
+    expect(facets[0].abi).toBeUndefined()
+    expect(sourcifyResults).toEqual([null, null])
+  })
+})
+
+describe('composeDiamondResolution', () => {
+  it('builds compositeAbi, metadataLayer, and natspec from enriched facets', () => {
+    const facets = [
+      {
+        address: '0x' + 'aa'.repeat(20),
+        selectors: ['0xa9059cbb'],
+        abi: [{ type: 'function', name: 'transfer', inputs: [{ type: 'address' }, { type: 'uint256' }] }],
+        natspec: { userdoc: { methods: { 'transfer(address,uint256)': { notice: 'a' } } } },
+      },
+      {
+        address: '0x' + 'bb'.repeat(20),
+        selectors: ['0x18160ddd'],
+        abi: [{ type: 'function', name: 'totalSupply', inputs: [] }],
+        natspec: { userdoc: { methods: { 'totalSupply()': { notice: 'b' } } } },
+      },
+    ]
+    const sourcifyResults: SourcifyResult[] = [
+      { functions: { 'transfer(address,uint256)': { description: 'a' } } },
+      { functions: { 'totalSupply()': { description: 'b' } } },
+    ]
+
+    const out = composeDiamondResolution(facets, sourcifyResults)
+    expect(out.compositeAbi).toHaveLength(2)
+    expect(out.metadataLayer?.functions).toBeTruthy()
+    expect(Object.keys(out.metadataLayer?.functions ?? {})).toEqual([
+      'transfer(address,uint256)',
+      'totalSupply()',
+    ])
+    expect(out.natspec?.userdoc).toBeTruthy()
+  })
+
+  it('omits all derived fields when facets have no ABI or NatSpec', () => {
+    const facets = [
+      { address: '0x' + 'aa'.repeat(20), selectors: ['0x18160ddd'] },
+    ]
+    const out = composeDiamondResolution(facets, [null])
+    expect(out.compositeAbi).toBeUndefined()
+    expect(out.metadataLayer).toBeUndefined()
+    expect(out.natspec).toBeUndefined()
+  })
+})
+
+describe('fetchDiamond (high-level)', () => {
+  const DIAMOND_ADDR = '0x1111111111111111111111111111111111111111'
+  const FACET_ADDR = '0x' + 'aa'.repeat(20)
+
+  it('returns null when the contract is not a diamond', async () => {
+    const fetchFn = createMockFetch([
+      {
+        match: (url, body) => url.includes('rpc.test')
+          && getCalldata(body).startsWith('0x01ffc9a7'),
+        response: { status: 200, body: rpcEnvelope(encodeBool(false)) },
+      },
+    ])
+    const result = await fetchDiamond('https://rpc.test', 1, DIAMOND_ADDR, fetchFn)
+    expect(result).toBeNull()
+  })
+
+  it('returns enriched resolution for a diamond', async () => {
+    const facetsReturn = encodeFacets([
+      { address: FACET_ADDR, selectors: ['0x18160ddd'] },
+    ])
+    const fetchFn = createMockFetch([
+      {
+        match: url => url.includes(FACET_ADDR) && url.includes('sourcify'),
+        response: {
+          status: 200,
+          body: {
+            abi: [{ type: 'function', name: 'totalSupply', inputs: [] }],
+            userdoc: { methods: { 'totalSupply()': { notice: 'supply' } } },
+            devdoc: { methods: {} },
+          },
+        },
+      },
+      {
+        match: (url, body) => url.includes('rpc.test')
+          && getCalldata(body).startsWith('0x01ffc9a7'),
+        response: { status: 200, body: rpcEnvelope(encodeBool(true)) },
+      },
+      {
+        match: (url, body) => url.includes('rpc.test')
+          && getCalldata(body).startsWith('0x7a0ed627'),
+        response: { status: 200, body: rpcEnvelope(facetsReturn) },
+      },
+    ])
+
+    const result = await fetchDiamond(
+      'https://rpc.test', 1, DIAMOND_ADDR, fetchFn, { sourcifyUrl: 'https://sourcify.test' },
+    )
+    expect(result).not.toBeNull()
+    expect(result!.facets).toHaveLength(1)
+    expect(result!.facets[0].abi).toHaveLength(1)
+    expect(result!.compositeAbi).toHaveLength(1)
+    expect(result!.metadataLayer?.functions).toBeTruthy()
+    expect(result!.natspec?.userdoc).toBeTruthy()
+  })
+
+  it('sourcify: false returns address+selectors only, no Sourcify network traffic', async () => {
+    const facetsReturn = encodeFacets([
+      { address: FACET_ADDR, selectors: ['0x18160ddd'] },
+    ])
+    const fetchFn = createMockFetch([
+      {
+        match: (url, body) => url.includes('rpc.test')
+          && getCalldata(body).startsWith('0x01ffc9a7'),
+        response: { status: 200, body: rpcEnvelope(encodeBool(true)) },
+      },
+      {
+        match: (url, body) => url.includes('rpc.test')
+          && getCalldata(body).startsWith('0x7a0ed627'),
+        response: { status: 200, body: rpcEnvelope(facetsReturn) },
+      },
+    ])
+
+    const result = await fetchDiamond(
+      'https://rpc.test', 1, DIAMOND_ADDR, fetchFn, { sourcify: false },
+    )
+    expect(result).not.toBeNull()
+    expect(result!.facets).toHaveLength(1)
+    expect(result!.facets[0].abi).toBeUndefined()
+    expect(result!.compositeAbi).toBeUndefined()
+    expect(result!.metadataLayer).toBeUndefined()
+
+    const calls = (fetchFn as any).mock.calls.map((c: any) => c[0])
+    expect(calls.some((url: string) => url.includes('sourcify'))).toBe(false)
   })
 })

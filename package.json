@@ -4,10 +4,47 @@
   "license": "MIT",
   "packageManager": "pnpm@10.33.0",
   "type": "module",
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./merge": {
+      "types": "./dist/merge.d.ts",
+      "import": "./dist/merge.js"
+    },
+    "./uri": {
+      "types": "./dist/uri.d.ts",
+      "import": "./dist/uri.js"
+    },
+    "./ens": {
+      "types": "./dist/ens.d.ts",
+      "import": "./dist/ens.js"
+    },
+    "./rpc": {
+      "types": "./dist/rpc.d.ts",
+      "import": "./dist/rpc.js"
+    },
+    "./errors": {
+      "types": "./dist/errors.d.ts",
+      "import": "./dist/errors.js"
+    },
+    "./sources/repository": {
+      "types": "./dist/sources/repository.d.ts",
+      "import": "./dist/sources/repository.js"
+    },
+    "./sources/contract-uri": {
+      "types": "./dist/sources/contract-uri.d.ts",
+      "import": "./dist/sources/contract-uri.js"
+    },
+    "./sources/sourcify": {
+      "types": "./dist/sources/sourcify.d.ts",
+      "import": "./dist/sources/sourcify.js"
+    },
+    "./sources/diamond": {
+      "types": "./dist/sources/diamond.d.ts",
+      "import": "./dist/sources/diamond.js"
     }
   },
   "main": "./dist/index.js",

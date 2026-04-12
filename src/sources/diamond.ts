@@ -1,7 +1,18 @@
 import { keccak_256 } from '@noble/hashes/sha3'
 import { ethCall } from '../rpc'
-import { isRecord } from '../merge'
+import { isRecord, merge } from '../merge'
 import { ContractMetadataFetchError } from '../errors'
+import { buildSourcifyLayer, fetchSourcify } from './sourcify'
+import type {
+  ContractMetadataDocument,
+  DiamondResolution,
+  FacetInfo,
+  NatSpec,
+  RawFacet,
+  SourcifyResult,
+} from '../types'
+
+export type { RawFacet } from '../types'
 
 export const DIAMOND_LOUPE_INTERFACE_ID = '0x48e2b093'
 export const SUPPORTS_INTERFACE_SELECTOR = '0x01ffc9a7'
@@ -15,11 +26,6 @@ const MAX_FACETS = 200
 const MAX_SELECTORS_PER_FACET = 1000
 
 const encoder = new TextEncoder()
-
-export interface RawFacet {
-  facetAddress: string
-  functionSelectors: string[]
-}
 
 /**
  * Detect whether a contract implements ERC-2535 (Diamond) and return its facets.
@@ -295,4 +301,100 @@ function isEventOrError(item: unknown): item is AbiFunctionLike {
   const t = (item as { type?: unknown }).type
   return (t === 'event' || t === 'error')
     && typeof (item as { name?: unknown }).name === 'string'
+}
+
+/**
+ * Enrich a set of raw facets with ABI + NatSpec from Sourcify.
+ *
+ * Dependency-injects the Sourcify fetcher so callers control caching, retries,
+ * URL overrides, or whether to run Sourcify at all (pass `null` to skip).
+ */
+export async function enrichFacets(
+  rawFacets: RawFacet[],
+  sourcifyFetch: ((address: string) => Promise<SourcifyResult | null>) | null,
+): Promise<{ facets: FacetInfo[]; sourcifyResults: (SourcifyResult | null)[] }> {
+  const sourcifyResults: (SourcifyResult | null)[] = sourcifyFetch
+    ? await Promise.all(
+        rawFacets.map(rf => sourcifyFetch(rf.facetAddress).catch(() => null)),
+      )
+    : rawFacets.map(() => null)
+
+  const facets: FacetInfo[] = rawFacets.map((rf, i) => {
+    const src = sourcifyResults[i]
+    const info: FacetInfo = {
+      address: rf.facetAddress,
+      selectors: rf.functionSelectors,
+    }
+    if (src?.abi) info.abi = filterAbiBySelectors(src.abi, rf.functionSelectors)
+    if (src?.userdoc || src?.devdoc) {
+      info.natspec = { userdoc: src.userdoc, devdoc: src.devdoc }
+    }
+    return info
+  })
+
+  return { facets, sourcifyResults }
+}
+
+/**
+ * Build the derived outputs (composite ABI, metadata layer, merged NatSpec)
+ * from enriched facets. Pure; takes no I/O.
+ */
+export function composeDiamondResolution(
+  facets: FacetInfo[],
+  sourcifyResults: (SourcifyResult | null)[],
+): Omit<DiamondResolution, 'facets'> {
+  const out: Omit<DiamondResolution, 'facets'> = {}
+
+  const abiLayers = facets
+    .map(f => f.abi)
+    .filter((a): a is unknown[] => a !== undefined)
+  if (abiLayers.length > 0) {
+    out.compositeAbi = buildCompositeAbi(abiLayers)
+  }
+
+  const layers = sourcifyResults
+    .map(src => src && buildSourcifyLayer(src))
+    .filter((l): l is Partial<ContractMetadataDocument> => !!l)
+  if (layers.length > 0) {
+    out.metadataLayer = merge(...layers)
+  }
+
+  const userdoc = mergeNatspecDocs(...facets.map(f => f.natspec?.userdoc))
+  const devdoc = mergeNatspecDocs(...facets.map(f => f.natspec?.devdoc))
+  if (userdoc || devdoc) {
+    const natspec: NatSpec = {}
+    if (userdoc) natspec.userdoc = userdoc
+    if (devdoc) natspec.devdoc = devdoc
+    out.natspec = natspec
+  }
+
+  return out
+}
+
+/**
+ * High-level: detect, fetch facets, and enrich with Sourcify. Returns null
+ * when the contract is not a diamond.
+ *
+ * Sourcify enrichment can be disabled via `options.sourcify: false` — the
+ * returned facets will then only carry `address` and `selectors`.
+ */
+export async function fetchDiamond(
+  rpc: string,
+  chainId: number,
+  address: string,
+  fetchFn: typeof fetch,
+  options: { sourcify?: boolean; sourcifyUrl?: string } = {},
+): Promise<DiamondResolution | null> {
+  const rawFacets = await detectAndFetchFacets(rpc, address, fetchFn)
+  if (!rawFacets) return null
+
+  const sourcifyEnabled = options.sourcify !== false
+  const sourcifyFetch = sourcifyEnabled
+    ? (a: string) => fetchSourcify(chainId, a, fetchFn, options.sourcifyUrl)
+    : null
+
+  const { facets, sourcifyResults } = await enrichFacets(rawFacets, sourcifyFetch)
+  const derived = composeDiamondResolution(facets, sourcifyResults)
+
+  return { facets, ...derived }
 }
