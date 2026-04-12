@@ -1,7 +1,8 @@
 import type {
-  ContractMetadataConfig,
-  ContractMetadataClient,
+  ContractClientConfig,
+  ContractClient,
   ContractMetadataDocument,
+  ContractResult,
   GetOptions,
   SourcifyResult,
   SourceConfig,
@@ -18,7 +19,7 @@ const DEFAULT_SCHEMA_BASE =
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 
-export function createContractMetadata(config: ContractMetadataConfig): ContractMetadataClient {
+export function createContractClient(config: ContractClientConfig): ContractClient {
   const chainId = config.chainId
   const rpc = config.rpc
   const repositoryUrl = config.repositoryUrl?.replace(/\/$/, '')
@@ -54,7 +55,7 @@ export function createContractMetadata(config: ContractMetadataConfig): Contract
   async function get(
     addressOrEns: string,
     options?: GetOptions,
-  ): Promise<ContractMetadataDocument> {
+  ): Promise<ContractResult> {
     const address = await resolveAddress(addressOrEns)
     const sources = effectiveSources(options?.sources)
 
@@ -92,11 +93,27 @@ export function createContractMetadata(config: ContractMetadataConfig): Contract
       throw new ContractMetadataNotFoundError(chainId, address)
     }
 
-    return {
-      ...merged,
+    const result: ContractResult = {
       chainId,
       address,
-    } as ContractMetadataDocument
+      metadata: {
+        ...merged,
+        chainId,
+        address,
+      } as ContractMetadataDocument,
+    }
+
+    // Attach non-metadata fields from Sourcify
+    if (srcResult?.abi) result.abi = srcResult.abi
+    if (srcResult?.userdoc || srcResult?.devdoc) {
+      result.natspec = {}
+      if (srcResult.userdoc) result.natspec.userdoc = srcResult.userdoc
+      if (srcResult.devdoc) result.natspec.devdoc = srcResult.devdoc
+    }
+    if (srcResult?.sources) result.sources = srcResult.sources
+    if (srcResult?.deployedBytecode) result.deployedBytecode = srcResult.deployedBytecode
+
+    return result
   }
 
   async function fetchRepository(
@@ -144,8 +161,10 @@ export {
 
 export type {
   ContractMetadataDocument,
-  ContractMetadataConfig,
-  ContractMetadataClient,
+  ContractClientConfig,
+  ContractClient,
+  ContractResult,
+  NatSpec,
   GetOptions,
   SourceConfig,
   SourcifyResult,

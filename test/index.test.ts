@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { createContractMetadata, ContractMetadataNotFoundError } from '../src/index'
+import { createContractClient, ContractMetadataNotFoundError } from '../src/index'
 
 const WETH = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2'
 
@@ -28,7 +28,7 @@ function createMockFetch(routes: MockRoute[]) {
   }) as unknown as typeof fetch
 }
 
-describe('createContractMetadata', () => {
+describe('createContractClient', () => {
   let originalFetch: typeof globalThis.fetch
 
   beforeEach(() => {
@@ -39,7 +39,7 @@ describe('createContractMetadata', () => {
     globalThis.fetch = originalFetch
   })
 
-  it('resolves metadata from all three sources', async () => {
+  it('resolves from all three sources', async () => {
     const repoMetadata = {
       name: 'Wrapped Ether',
       functions: {
@@ -50,12 +50,20 @@ describe('createContractMetadata', () => {
     const sourcifyResponse = {
       name: 'WETH9',
       abi: [{ type: 'function', name: 'deposit' }],
+      deployedBytecode: '0x6060604052',
+      sources: {
+        'contracts/WETH9.sol': { content: 'pragma solidity ^0.4.18;' },
+      },
       userdoc: {
         methods: {
           'withdraw(uint256)': { notice: 'Withdraw WETH to ETH' },
         },
       },
-      devdoc: { methods: {} },
+      devdoc: {
+        methods: {
+          'withdraw(uint256)': { details: 'Burns WETH' },
+        },
+      },
     }
 
     const contractUriJson = {
@@ -90,27 +98,41 @@ describe('createContractMetadata', () => {
       },
     ])
 
-    const cm = createContractMetadata({
+    const client = createContractClient({
       chainId: 1,
       rpc: 'https://rpc.test',
       fetch: fetchFn,
     })
 
-    const result = await cm.get(WETH)
+    const result = await client.get(WETH)
 
-    // Repository wins for name (highest priority)
-    expect(result.name).toBe('Wrapped Ether')
-    // contractURI provides symbol and image
-    expect(result.symbol).toBe('WETH')
-    expect(result.image).toBe('https://example.com/weth.png')
-    // Repository's curated function takes priority
-    expect(result.functions?.deposit).toEqual({ title: 'Wrap ETH', description: 'curated' })
-    // Sourcify/NatSpec fills in functions not in repo
-    expect(result.functions?.withdraw).toBeTruthy()
-    expect(result.functions?.withdraw?.description).toBe('Withdraw WETH to ETH')
-    // Always has chainId and address
+    // Top-level identity
     expect(result.chainId).toBe(1)
     expect(result.address).toBe(WETH)
+
+    // Metadata: repository wins for name (highest priority)
+    expect(result.metadata.name).toBe('Wrapped Ether')
+    // contractURI provides symbol and image
+    expect(result.metadata.symbol).toBe('WETH')
+    expect(result.metadata.image).toBe('https://example.com/weth.png')
+    // Repository's curated function takes priority
+    expect(result.metadata.functions?.deposit).toEqual({ title: 'Wrap ETH', description: 'curated' })
+    // Sourcify/NatSpec fills in functions not in repo
+    expect(result.metadata.functions?.withdraw).toBeTruthy()
+    expect(result.metadata.functions?.withdraw?.description).toBe('Withdraw WETH to ETH')
+
+    // ABI from Sourcify
+    expect(result.abi).toEqual([{ type: 'function', name: 'deposit' }])
+
+    // NatSpec raw objects
+    expect(result.natspec?.userdoc).toBeTruthy()
+    expect(result.natspec?.devdoc).toBeTruthy()
+
+    // Source code
+    expect(result.sources).toEqual({ 'contracts/WETH9.sol': 'pragma solidity ^0.4.18;' })
+
+    // Deployed bytecode
+    expect(result.deployedBytecode).toBe('0x6060604052')
   })
 
   it('works with sourcify only', async () => {
@@ -128,26 +150,27 @@ describe('createContractMetadata', () => {
       },
     ])
 
-    const cm = createContractMetadata({
+    const client = createContractClient({
       chainId: 1,
       fetch: fetchFn,
     })
 
-    const result = await cm.get(WETH)
-    expect(result.name).toBe('WETH9')
+    const result = await client.get(WETH)
+    expect(result.metadata.name).toBe('WETH9')
     expect(result.chainId).toBe(1)
     expect(result.address).toBe(WETH)
+    expect(result.abi).toEqual([{ type: 'function', name: 'deposit' }])
   })
 
   it('throws NotFoundError when all sources return null', async () => {
     const fetchFn = createMockFetch([]) // all 404
 
-    const cm = createContractMetadata({
+    const client = createContractClient({
       chainId: 1,
       fetch: fetchFn,
     })
 
-    await expect(cm.get(WETH)).rejects.toBeInstanceOf(ContractMetadataNotFoundError)
+    await expect(client.get(WETH)).rejects.toBeInstanceOf(ContractMetadataNotFoundError)
   })
 
   it('allows disabling sources via config', async () => {
@@ -160,14 +183,14 @@ describe('createContractMetadata', () => {
       },
     ])
 
-    const cm = createContractMetadata({
+    const client = createContractClient({
       chainId: 1,
       fetch: fetchFn,
       sources: { sourcify: false, contractURI: false },
     })
 
-    const result = await cm.get(WETH)
-    expect(result.name).toBe('From Repo')
+    const result = await client.get(WETH)
+    expect(result.metadata.name).toBe('From Repo')
 
     // Sourcify should not have been called
     const calls = (fetchFn as any).mock.calls.map((c: any) => c[0])
@@ -193,27 +216,27 @@ describe('createContractMetadata', () => {
       },
     ])
 
-    const cm = createContractMetadata({
+    const client = createContractClient({
       chainId: 1,
       fetch: fetchFn,
     })
 
     // Disable repository for this call
-    const result = await cm.get(WETH, { sources: { repository: false } })
-    expect(result.name).toBe('From Sourcify')
+    const result = await client.get(WETH, { sources: { repository: false } })
+    expect(result.metadata.name).toBe('From Sourcify')
   })
 
   it('skips contractURI when no rpc configured', async () => {
     const fetchFn = createMockFetch([])
 
-    const cm = createContractMetadata({
+    const client = createContractClient({
       chainId: 1,
       fetch: fetchFn,
       // no rpc
     })
 
     // Should not throw about missing rpc, just skip contractURI
-    await expect(cm.get(WETH)).rejects.toBeInstanceOf(ContractMetadataNotFoundError)
+    await expect(client.get(WETH)).rejects.toBeInstanceOf(ContractMetadataNotFoundError)
   })
 
   it('exposes individual source fetchers', async () => {
@@ -226,37 +249,60 @@ describe('createContractMetadata', () => {
       },
     ])
 
-    const cm = createContractMetadata({
+    const client = createContractClient({
       chainId: 1,
       fetch: fetchFn,
     })
 
-    const repo = await cm.fetchRepository(WETH)
+    const repo = await client.fetchRepository(WETH)
     expect(repo).toEqual(repoMetadata)
 
-    const uri = await cm.fetchContractURI(WETH)
+    const uri = await client.fetchContractURI(WETH)
     expect(uri).toBeNull() // no rpc configured
 
-    const src = await cm.fetchSourcify(WETH)
+    const src = await client.fetchSourcify(WETH)
     expect(src).toBeNull() // 404
   })
 
   it('throws on invalid address or ENS name', async () => {
-    const cm = createContractMetadata({
+    const client = createContractClient({
       chainId: 1,
       fetch: vi.fn() as unknown as typeof fetch,
     })
 
-    await expect(cm.get('not-an-address')).rejects.toThrow('Invalid address or ENS name')
+    await expect(client.get('not-an-address')).rejects.toThrow('Invalid address or ENS name')
   })
 
   it('requires rpc for ENS resolution', async () => {
-    const cm = createContractMetadata({
+    const client = createContractClient({
       chainId: 1,
       fetch: vi.fn() as unknown as typeof fetch,
       // no rpc
     })
 
-    await expect(cm.get('vitalik.eth')).rejects.toThrow('RPC URL required')
+    await expect(client.get('vitalik.eth')).rejects.toThrow('RPC URL required')
+  })
+
+  it('omits natspec/sources/bytecode when sourcify has none', async () => {
+    const repoMetadata = { name: 'Simple Contract' }
+
+    const fetchFn = createMockFetch([
+      {
+        match: url => url.includes('contract-metadata'),
+        response: { status: 200, body: repoMetadata },
+      },
+    ])
+
+    const client = createContractClient({
+      chainId: 1,
+      fetch: fetchFn,
+      sources: { sourcify: false, contractURI: false },
+    })
+
+    const result = await client.get(WETH)
+    expect(result.abi).toBeUndefined()
+    expect(result.natspec).toBeUndefined()
+    expect(result.sources).toBeUndefined()
+    expect(result.deployedBytecode).toBeUndefined()
   })
 })

@@ -37,6 +37,9 @@ describe('fetchSourcify', () => {
     expect(result!.abi).toEqual([{ type: 'function', name: 'deposit' }])
     expect(result!.functions?.deposit).toBeTruthy()
     expect(result!.functions?.deposit?.description).toBe('Deposit ETH to get WETH')
+    // Raw natspec preserved
+    expect(result!.userdoc).toEqual(response.userdoc)
+    expect(result!.devdoc).toEqual(response.devdoc)
   })
 
   it('returns null on 404', async () => {
@@ -69,8 +72,40 @@ describe('fetchSourcify', () => {
     await fetchSourcify(chainId, address, fetchFn, 'https://sourcify.test')
 
     expect(fetchFn).toHaveBeenCalledWith(
-      `https://sourcify.test/v2/contract/${chainId}/${address}?fields=abi,name,userdoc,devdoc`,
+      `https://sourcify.test/v2/contract/${chainId}/${address}?fields=abi,name,userdoc,devdoc,deployedBytecode,sources`,
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     )
+  })
+
+  it('includes deployed bytecode when available', async () => {
+    const response = {
+      abi: [],
+      deployedBytecode: '0x6060604052',
+      userdoc: { methods: {} },
+      devdoc: { methods: {} },
+    }
+    const fetchFn = mockFetch(response)
+
+    const result = await fetchSourcify(chainId, address, fetchFn, 'https://sourcify.test')
+    expect(result!.deployedBytecode).toBe('0x6060604052')
+  })
+
+  it('flattens source files to path → content map', async () => {
+    const response = {
+      abi: [],
+      sources: {
+        'contracts/Token.sol': { content: 'pragma solidity ^0.8.0;' },
+        'contracts/lib/Utils.sol': { content: 'library Utils {}' },
+      },
+      userdoc: { methods: {} },
+      devdoc: { methods: {} },
+    }
+    const fetchFn = mockFetch(response)
+
+    const result = await fetchSourcify(chainId, address, fetchFn, 'https://sourcify.test')
+    expect(result!.sources).toEqual({
+      'contracts/Token.sol': 'pragma solidity ^0.8.0;',
+      'contracts/lib/Utils.sol': 'library Utils {}',
+    })
   })
 })

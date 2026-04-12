@@ -11,24 +11,26 @@ npm install @evmnow/sdk
 ## Quick start
 
 ```ts
-import { createContractMetadata } from '@evmnow/sdk'
+import { createContractClient } from '@evmnow/sdk'
 
-const client = createContractMetadata({
+const client = createContractClient({
   chainId: 1,
   rpc: 'https://eth.llamarpc.com',
 })
 
-const metadata = await client.get('0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984')
+const result = await client.get('0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984')
 
-console.log(metadata.name)        // "Uniswap"
-console.log(metadata.description) // ...
-console.log(metadata.functions)   // { "delegate(address)": { title: "...", ... }, ... }
+console.log(result.metadata.name)        // "Uniswap"
+console.log(result.metadata.description) // ...
+console.log(result.metadata.functions)   // { "delegate(address)": { title: "...", ... }, ... }
+console.log(result.abi)                  // full ABI from Sourcify
+console.log(result.sources)             // verified source files
 ```
 
 ENS names work too:
 
 ```ts
-const metadata = await client.get('uniswap.eth')
+const result = await client.get('uniswap.eth')
 ```
 
 ## How it works
@@ -46,7 +48,7 @@ Higher-priority sources override lower ones. Record sections (`functions`, `even
 ## Configuration
 
 ```ts
-const client = createContractMetadata({
+const client = createContractClient({
   // Required
   chainId: 1,
 
@@ -68,17 +70,31 @@ const client = createContractMetadata({
 
 ## API
 
-### `createContractMetadata(config)` → `ContractMetadataClient`
+### `createContractClient(config)` → `ContractClient`
 
 Creates a client bound to a specific chain.
 
-### `client.get(addressOrEns, options?)`
+### `client.get(addressOrEns, options?)` → `ContractResult`
 
 Fetches and merges metadata from all enabled sources. Accepts a `0x` address or `.eth` ENS name (requires `rpc`).
 
+Returns a `ContractResult`:
+
+```ts
+interface ContractResult {
+  chainId: number
+  address: string
+  metadata: ContractMetadataDocument  // merged metadata from all sources
+  abi?: unknown[]                     // full ABI from Sourcify
+  natspec?: NatSpec                   // raw userdoc/devdoc from Sourcify
+  sources?: Record<string, string>    // verified source files from Sourcify
+  deployedBytecode?: string           // deployed bytecode from Sourcify
+}
+```
+
 ```ts
 // Disable a source for a single call
-const metadata = await client.get('0x...', {
+const result = await client.get('0x...', {
   sources: { sourcify: false },
 })
 ```
@@ -95,7 +111,7 @@ Fetch only the on-chain contractURI. Returns `null` if not found or no RPC confi
 
 ### `client.fetchSourcify(address)`
 
-Fetch only from Sourcify. Returns the raw `SourcifyResult` (ABI + parsed NatSpec).
+Fetch only from Sourcify. Returns the raw `SourcifyResult` (ABI, parsed NatSpec, sources, bytecode).
 
 ### `merge(...layers)`
 
@@ -162,7 +178,7 @@ import {
 } from '@evmnow/sdk'
 
 try {
-  const metadata = await client.get('0x...')
+  const result = await client.get('0x...')
 } catch (e) {
   if (e instanceof ContractMetadataNotFoundError) {
     // No metadata found from any source

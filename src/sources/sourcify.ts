@@ -5,11 +5,17 @@ import { ContractMetadataFetchError } from '../errors'
 
 const DEFAULT_SOURCIFY_URL = 'https://sourcify.dev/server'
 
+interface SourcifySource {
+  content: string
+}
+
 interface SourcifyResponse {
   name?: string
   abi?: unknown[]
   userdoc?: SourcifyUserDoc
   devdoc?: SourcifyDevDoc
+  deployedBytecode?: string
+  sources?: Record<string, SourcifySource>
 }
 
 export async function fetchSourcify(
@@ -18,7 +24,7 @@ export async function fetchSourcify(
   fetchFn: typeof fetch,
   baseUrl = DEFAULT_SOURCIFY_URL,
 ): Promise<SourcifyResult | null> {
-  const url = `${baseUrl}/v2/contract/${chainId}/${address}?fields=abi,name,userdoc,devdoc`
+  const url = `${baseUrl}/v2/contract/${chainId}/${address}?fields=abi,name,userdoc,devdoc,deployedBytecode,sources`
 
   let res: Response
   try {
@@ -55,6 +61,14 @@ export async function fetchSourcify(
 
   if (data.abi) result.abi = data.abi
   if (data.name) result.name = data.name
+  if (data.userdoc) result.userdoc = data.userdoc as Record<string, unknown>
+  if (data.devdoc) result.devdoc = data.devdoc as Record<string, unknown>
+  if (data.deployedBytecode) result.deployedBytecode = data.deployedBytecode
+  if (data.sources) {
+    result.sources = Object.fromEntries(
+      Object.entries(data.sources).map(([path, src]) => [path, src.content]),
+    )
+  }
   if (metadata.functions && Object.keys(metadata.functions).length > 0) {
     result.functions = metadata.functions as Record<string, FunctionMeta>
   }

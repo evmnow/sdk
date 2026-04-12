@@ -184,7 +184,7 @@ export interface SourceConfig {
   sourcify?: boolean
 }
 
-export interface ContractMetadataConfig {
+export interface ContractClientConfig {
   chainId: number
   rpc?: string
   repositoryUrl?: string
@@ -198,10 +198,27 @@ export interface GetOptions {
   sources?: SourceConfig
 }
 
+// ── Result ──
+
+export interface ContractResult {
+  chainId: number
+  address: string
+  metadata: ContractMetadataDocument
+  abi?: unknown[]
+  natspec?: NatSpec
+  sources?: Record<string, string>
+  deployedBytecode?: string
+}
+
+export interface NatSpec {
+  userdoc?: Record<string, unknown>
+  devdoc?: Record<string, unknown>
+}
+
 // ── Client ──
 
-export interface ContractMetadataClient {
-  get: (addressOrEns: string, options?: GetOptions) => Promise<ContractMetadataDocument>
+export interface ContractClient {
+  get: (addressOrEns: string, options?: GetOptions) => Promise<ContractResult>
   fetchRepository: (address: string) => Promise<Partial<ContractMetadataDocument> | null>
   fetchContractURI: (address: string) => Promise<Partial<ContractMetadataDocument> | null>
   fetchSourcify: (address: string) => Promise<SourcifyResult | null>
@@ -210,6 +227,10 @@ export interface ContractMetadataClient {
 export interface SourcifyResult {
   abi?: unknown[]
   name?: string
+  userdoc?: Record<string, unknown>
+  devdoc?: Record<string, unknown>
+  sources?: Record<string, string>
+  deployedBytecode?: string
   functions?: Record<string, FunctionMeta>
   events?: Record<string, EventMeta>
   errors?: Record<string, ErrorMeta>
