@@ -1,5 +1,11 @@
 # @evmnow/sdk
 
+## 0.1.1
+
+### Patch Changes
+
+- [`6dc8182`](https://github.com/evmnow/sdk/commit/6dc8182ed8a8c100f639455759a83735dcfd0d81) Thanks [@yougogirldoteth](https://github.com/yougogirldoteth)! - Fix resolving ENS
+
 ## 0.1.0
 
 ### Minor Changes
