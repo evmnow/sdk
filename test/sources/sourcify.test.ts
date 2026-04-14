@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { fetchSourcify } from '../../src/sources/sourcify'
+import { fetchSourcify, fetchSourcifyWithStatus } from '../../src/sources/sourcify'
 
 function mockFetch(body: unknown, status = 200) {
   return vi.fn().mockResolvedValue({
@@ -44,6 +44,12 @@ describe('fetchSourcify', () => {
   it('returns null on 404', async () => {
     const result = await fetchSourcify(chainId, address, mockFetch(null, 404))
     expect(result).toBeNull()
+  })
+
+  it('reports notFound status on 404', async () => {
+    const result = await fetchSourcifyWithStatus(chainId, address, mockFetch(null, 404))
+
+    expect(result).toEqual({ result: null, notFound: true })
   })
 
   it('throws on non-404 error', async () => {
