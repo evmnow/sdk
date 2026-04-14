@@ -25,6 +25,11 @@ interface SourcifyResponse {
 
 const BASE_FIELDS = 'abi,userdoc,devdoc'
 
+export interface SourcifyFetchStatus {
+  result: SourcifyResult | null
+  notFound: boolean
+}
+
 export async function fetchSourcify(
   chainId: number,
   address: string,
@@ -32,6 +37,19 @@ export async function fetchSourcify(
   baseUrl = DEFAULT_SOURCIFY_URL,
   extraFields?: string[],
 ): Promise<SourcifyResult | null> {
+  const { result } = await fetchSourcifyWithStatus(
+    chainId, address, fetchFn, baseUrl, extraFields,
+  )
+  return result
+}
+
+export async function fetchSourcifyWithStatus(
+  chainId: number,
+  address: string,
+  fetchFn: typeof fetch,
+  baseUrl = DEFAULT_SOURCIFY_URL,
+  extraFields?: string[],
+): Promise<SourcifyFetchStatus> {
   const fields = extraFields?.length
     ? `${BASE_FIELDS},${extraFields.join(',')}`
     : BASE_FIELDS
@@ -46,7 +64,7 @@ export async function fetchSourcify(
     )
   }
 
-  if (res.status === 404) return null
+  if (res.status === 404) return { result: null, notFound: true }
   if (!res.ok) {
     throw new ContractMetadataFetchError(
       'sourcify', res.status, `Sourcify returned ${res.status}`,
@@ -89,7 +107,10 @@ export async function fetchSourcify(
     result.errors = metadata.errors as Record<string, ErrorMeta>
   }
 
-  return Object.keys(result).length > 0 ? result : null
+  return {
+    result: Object.keys(result).length > 0 ? result : null,
+    notFound: false,
+  }
 }
 
 /**
