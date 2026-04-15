@@ -1,5 +1,6 @@
 import type {
   ContractClientConfig,
+  ContractAbiLayer,
   ContractClient,
   ContractMetadataDocument,
   ContractResult,
@@ -41,6 +42,38 @@ const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 
 type ClientSourcifyStatus = SourcifyFetchStatus & {
   unavailable?: boolean
+}
+
+function buildMainAbiLayer(address: string, abi: unknown[]): ContractAbiLayer {
+  return {
+    role: 'main',
+    address,
+    callAddress: address,
+    callMode: 'direct',
+    abi,
+  }
+}
+
+function buildProxyTargetAbiLayers(
+  proxyAddress: string,
+  rawProxy: RawProxy,
+  targets: { address: string; selectors?: string[]; abi?: unknown[] }[],
+): ContractAbiLayer[] {
+  return targets.flatMap((target) => {
+    if (!target.abi) return []
+
+    return {
+      role: rawProxy.pattern === 'eip-2535-diamond'
+        ? ('facet' as const)
+        : ('proxy-target' as const),
+      address: target.address,
+      callAddress: proxyAddress,
+      callMode: 'delegatecall-through-proxy' as const,
+      abi: target.abi,
+      ...(target.selectors !== undefined ? { selectors: target.selectors } : {}),
+      pattern: rawProxy.pattern,
+    }
+  })
 }
 
 export function createContractClient(config: ContractClientConfig): ContractClient {
@@ -166,7 +199,10 @@ export function createContractClient(config: ContractClientConfig): ContractClie
       metadata: { ...merged, chainId, address } as ContractMetadataDocument,
     }
 
-    if (srcResult?.abi) result.abi = srcResult.abi
+    if (srcResult?.abi) {
+      result.abi = srcResult.abi
+      result.abiLayers = [buildMainAbiLayer(address, srcResult.abi)]
+    }
     if (srcResult?.userdoc || srcResult?.devdoc) {
       result.natspec = { userdoc: srcResult.userdoc, devdoc: srcResult.devdoc }
     }
@@ -199,11 +235,16 @@ export function createContractClient(config: ContractClientConfig): ContractClie
 
     const { targets, sourcifyResults } = await enrichTargets(rawProxy.targets, sourcifyFetch)
     const derived = composeProxyResolution(targets, sourcifyResults)
+    const abiLayers = [
+      ...(result.abiLayers ?? []),
+      ...buildProxyTargetAbiLayers(result.address, rawProxy, targets),
+    ]
 
     const proxy: ProxyResolution = { pattern: rawProxy.pattern, targets, ...derived }
     if (rawProxy.beacon) proxy.beacon = rawProxy.beacon
     if (rawProxy.admin) proxy.admin = rawProxy.admin
     result.proxy = proxy
+    if (abiLayers.length > 0) result.abiLayers = abiLayers
 
     // Composite ABI: main contract first (it may legitimately mount admin/loupe
     // functions itself), then each target's filtered ABI. First-occurrence wins.
@@ -353,6 +394,9 @@ export type {
   ContractClientConfig,
   ContractClient,
   ContractResult,
+  ContractAbiLayer,
+  AbiLayerRole,
+  AbiLayerCallMode,
   ProxyResolution,
   ProxyPattern,
   TargetInfo,

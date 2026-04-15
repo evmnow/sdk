@@ -219,6 +219,7 @@ export interface ContractResult {
   address: string
   metadata: ContractMetadataDocument
   abi?: unknown[]
+  abiLayers?: ContractAbiLayer[]
   natspec?: NatSpec
   sources?: Record<string, string>
   deployedBytecode?: string
@@ -231,6 +232,25 @@ export interface NatSpec {
 }
 
 export type { ProxyPattern, ResolvedTarget, RawProxy } from '@1001-digital/proxies'
+
+export type AbiLayerRole = 'main' | 'proxy-target' | 'facet'
+export type AbiLayerCallMode = 'direct' | 'delegatecall-through-proxy'
+
+export interface ContractAbiLayer {
+  /** Where this ABI came from in relation to the requested contract. */
+  role: AbiLayerRole
+  /** Address whose verified artifact supplied this ABI. */
+  address: string
+  /** Address callers should use when invoking functions from this layer. */
+  callAddress: string
+  /** Whether calls execute directly or through a proxy fallback/delegatecall. */
+  callMode: AbiLayerCallMode
+  abi: unknown[]
+  /** Defined for selector-scoped layers, currently diamond facets. */
+  selectors?: string[]
+  /** Proxy pattern that introduced this layer, when applicable. */
+  pattern?: import('@1001-digital/proxies').ProxyPattern
+}
 
 /** An implementation target behind a proxy, enriched with ABI + NatSpec. */
 export interface TargetInfo {
