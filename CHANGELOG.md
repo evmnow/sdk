@@ -1,5 +1,11 @@
 # @evmnow/sdk
 
+## 0.1.3
+
+### Patch Changes
+
+- [`f2a6f75`](https://github.com/evmnow/sdk/commit/f2a6f7554d3a4d9cfd42f93181afbea6057cde58) Thanks [@jwahdatehagh](https://github.com/jwahdatehagh)! - Update proxies library
+
 ## 0.1.2
 
 ### Patch Changes
