@@ -46,7 +46,7 @@ describe('enrichTargets (Sourcify-bound)', () => {
     const src: SourcifyResult = {
       abi: [{ type: 'function', name: 'transfer', inputs: [{ type: 'address' }, { type: 'uint256' }] }],
       userdoc: { methods: { 'transfer(address,uint256)': { notice: 'moves' } } },
-      functions: { 'transfer(address,uint256)': { description: 'moves' } },
+      actions: { 'transfer(address,uint256)': { function: 'transfer(address,uint256)', description: 'moves' } },
     }
     const sourcifyFetch = vi.fn(async (addr: string) =>
       addr === '0x' + 'aa'.repeat(20) ? src : null,
@@ -82,7 +82,7 @@ describe('enrichTargets (Sourcify-bound)', () => {
 })
 
 describe('composeProxyResolution (metadataLayer)', () => {
-  it('builds metadataLayer from SourcifyResult.functions/events/errors', () => {
+  it('builds metadataLayer from SourcifyResult.actions/events/errors', () => {
     const targets = [
       {
         address: '0x' + 'aa'.repeat(20),
@@ -92,13 +92,13 @@ describe('composeProxyResolution (metadataLayer)', () => {
     ]
     const sourcifyResults: SourcifyResult[] = [
       {
-        functions: { 'transfer(address,uint256)': { description: 'moves tokens' } },
+        actions: { 'transfer(address,uint256)': { function: 'transfer(address,uint256)', description: 'moves tokens' } },
         events: { 'Transfer(address,address,uint256)': { description: 'emitted on transfer' } },
       },
     ]
 
     const out = composeProxyResolution(targets, sourcifyResults)
-    expect(out.metadataLayer?.functions).toBeTruthy()
+    expect(out.metadataLayer?.actions).toBeTruthy()
     expect(out.metadataLayer?.events).toBeTruthy()
     expect(out.compositeAbi).toHaveLength(1)
   })
@@ -172,7 +172,7 @@ describe('fetchProxy (high-level)', () => {
     expect(result!.targets).toHaveLength(1)
     expect(result!.targets[0].abi).toHaveLength(1)
     expect(result!.compositeAbi).toHaveLength(1)
-    expect(result!.metadataLayer?.functions).toBeTruthy()
+    expect(result!.metadataLayer?.actions).toBeTruthy()
     expect(result!.natspec?.userdoc).toBeTruthy()
   })
 

@@ -34,8 +34,9 @@ describe('fetchSourcify', () => {
 
     expect(result).toBeTruthy()
     expect(result!.abi).toEqual([{ type: 'function', name: 'deposit' }])
-    expect(result!.functions?.deposit).toBeTruthy()
-    expect(result!.functions?.deposit?.description).toBe('Deposit ETH to get WETH')
+    expect(result!.actions?.deposit).toBeTruthy()
+    expect(result!.actions?.deposit?.function).toBe('deposit')
+    expect(result!.actions?.deposit?.description).toBe('Deposit ETH to get WETH')
     // Raw natspec preserved
     expect(result!.userdoc).toEqual(response.userdoc)
     expect(result!.devdoc).toEqual(response.devdoc)
@@ -62,7 +63,7 @@ describe('fetchSourcify', () => {
     const result = await fetchSourcify(chainId, address, fetchFn, 'https://sourcify.test')
     expect(result).toBeTruthy()
     expect(result!.abi).toBeTruthy()
-    expect(result!.functions).toBeUndefined()
+    expect(result!.actions).toBeUndefined()
   })
 
   it('constructs URL with base fields by default', async () => {

@@ -41,8 +41,8 @@ describe('fetchContractURI', () => {
     const metadata = {
       name: 'Test',
       symbol: 'T',
-      functions: { transfer: {} }, // not an ERC-7572 field
-      custom: 'value',             // not an ERC-7572 field
+      actions: { transfer: { function: 'transfer' } }, // not an ERC-7572 field
+      custom: 'value',                                  // not an ERC-7572 field
     }
     const dataUri = `data:application/json;base64,${btoa(JSON.stringify(metadata))}`
     const abiResult = abiEncodeString(dataUri)
@@ -55,7 +55,7 @@ describe('fetchContractURI', () => {
     const result = await fetchContractURI(chainId, address, rpc, fetchFn)
 
     expect(result).toEqual({ name: 'Test', symbol: 'T' })
-    expect(result).not.toHaveProperty('functions')
+    expect(result).not.toHaveProperty('actions')
     expect(result).not.toHaveProperty('custom')
   })
 

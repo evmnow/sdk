@@ -1,7 +1,7 @@
 import type { ContractMetadataDocument } from './types'
 
 // Top-level keys that contain Record<string, object> and should merge per-key
-const RECORD_SECTIONS = ['groups', 'functions', 'events', 'errors', 'messages'] as const
+const RECORD_SECTIONS = ['groups', 'actions', 'events', 'errors', 'messages'] as const
 
 type RecordSection = typeof RECORD_SECTIONS[number]
 

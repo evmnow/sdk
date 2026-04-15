@@ -22,7 +22,7 @@ export interface ContractMetadataDocument {
   audits?: AuditReference[]
   theme?: Theme
   groups?: Record<string, Group>
-  functions?: Record<string, FunctionMeta>
+  actions?: Record<string, ActionMeta>
   events?: Record<string, EventMeta>
   errors?: Record<string, ErrorMeta>
   messages?: Record<string, MessageMeta>
@@ -62,7 +62,17 @@ export interface Group {
   order: number
 }
 
-export interface FunctionMeta {
+export interface ActionMeta {
+  /**
+   * Reference to the ABI function this action invokes. Accepts a bare name
+   * (e.g. "approve"), a full Solidity signature for overloaded functions
+   * (e.g. "approve(address,uint256)"), or a 4-byte selector (e.g. "0x095ea7b3").
+   *
+   * Optional — when omitted, the action's id (its key in the `actions` object)
+   * is used as the reference. Variants whose id differs from the underlying
+   * function name (e.g. `revoke` invoking `approve`) MUST set this explicitly.
+   */
+  function?: string
   order?: number
   title?: string
   description?: string
@@ -70,11 +80,16 @@ export interface FunctionMeta {
   group?: string
   warning?: string
   featured?: boolean
+  /**
+   * Hide this action from the default UI. Also used to suppress an
+   * ABI-synthesized default action when only authored variants should render.
+   */
   hidden?: boolean
   stateMutability?: 'view' | 'pure' | 'nonpayable' | 'payable'
   params?: Record<string, ParamMeta>
   returns?: Record<string, ParamMeta>
-  examples?: FunctionExample[]
+  examples?: ActionExample[]
+  /** Identifiers of related actions (keys in the top-level `actions` object). */
   related?: string[]
   deprecated?: string
   [key: `_${string}`]: unknown
@@ -113,6 +128,21 @@ export interface ParamMeta {
   autofill?: Autofill
   validation?: ValidationRule
   preview?: ParamPreview
+  /**
+   * When true, do not render an input for this parameter. The `autofill`
+   * value is injected at call time. REQUIRES `autofill`.
+   *
+   * Note: this is the input-side hidden flag — orthogonal to the display-side
+   * `type: "hidden"` semantic type, which controls whether a value is rendered
+   * in read contexts.
+   */
+  hidden?: boolean
+  /**
+   * When true, render the input but make it non-editable. Displays the
+   * autofilled value for transparency. REQUIRES `autofill`. Mutually
+   * exclusive with `hidden: true`.
+   */
+  disabled?: boolean
   [key: `_${string}`]: unknown
 }
 
@@ -171,7 +201,7 @@ export interface ParamPreview {
   image?: string
 }
 
-export interface FunctionExample {
+export interface ActionExample {
   label: string
   params: Record<string, string>
 }
@@ -279,7 +309,7 @@ export interface SourcifyResult {
   devdoc?: Record<string, unknown>
   sources?: Record<string, string>
   deployedBytecode?: string
-  functions?: Record<string, FunctionMeta>
+  actions?: Record<string, ActionMeta>
   events?: Record<string, EventMeta>
   errors?: Record<string, ErrorMeta>
 }

@@ -313,6 +313,17 @@ export {
   ENSResolutionError,
 } from './errors'
 
+// Action resolution
+export { resolveActions } from './actions'
+export type {
+  AbiFunction,
+  AbiParam,
+  ResolvedAction,
+  ActionResolutionIssue,
+  ActionResolutionResult,
+  ActionIssueCode,
+} from './actions'
+
 // Types
 export type {
   ContractMetadataDocument,
@@ -335,7 +346,7 @@ export type {
   Link,
   AuditReference,
   Group,
-  FunctionMeta,
+  ActionMeta,
   EventMeta,
   ErrorMeta,
   MessageMeta,
@@ -344,5 +355,5 @@ export type {
   Autofill,
   ValidationRule,
   ParamPreview,
-  FunctionExample,
+  ActionExample,
 } from './types'
