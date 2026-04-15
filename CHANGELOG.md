@@ -1,5 +1,11 @@
 # @evmnow/sdk
 
+## 0.1.2
+
+### Patch Changes
+
+- [`0e03e1f`](https://github.com/evmnow/sdk/commit/0e03e1fa40156807b38fafef67bc9960a5f89a36) Thanks [@yougogirldoteth](https://github.com/yougogirldoteth)! - Add structured not found errors for sourcify misses
+
 ## 0.1.1
 
 ### Patch Changes
