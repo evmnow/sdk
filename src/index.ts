@@ -11,12 +11,20 @@ import type {
   SourcifyResult,
   SourceConfig,
 } from './types'
-import { ContractMetadataNotFoundError } from './errors'
+import {
+  ContractMetadataNotFoundError,
+  ContractNotVerifiedOnSourcifyError,
+} from './errors'
 import { merge, resolveIncludes } from './merge'
 import { resolveEns, getChainId } from './rpc'
 import { fetchRepository as fetchRepo } from './sources/repository'
 import { fetchContractURI as fetchUri } from './sources/contract-uri'
-import { fetchSourcify as fetchSrc, buildSourcifyLayer } from './sources/sourcify'
+import {
+  fetchSourcify as fetchSrc,
+  fetchSourcifyWithStatus,
+  buildSourcifyLayer,
+} from './sources/sourcify'
+import type { SourcifyFetchStatus } from './sources/sourcify'
 import {
   buildCompositeAbi,
   composeProxyResolution,
@@ -30,6 +38,10 @@ const DEFAULT_SCHEMA_BASE =
   'https://raw.githubusercontent.com/evmnow/contract-metadata/refs/heads/main/schema'
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
+
+type ClientSourcifyStatus = SourcifyFetchStatus & {
+  unavailable?: boolean
+}
 
 export function createContractClient(config: ContractClientConfig): ContractClient {
   const chainId = config.chainId
@@ -109,9 +121,10 @@ export function createContractClient(config: ContractClientConfig): ContractClie
       ? fetchContractURI(address).catch(() => null)
       : Promise.resolve(null)
 
-    const srcPromise: Promise<SourcifyResult | null> = sourcifyEnabled
-      ? fetchSourcifyWithFields(address, extraFields).catch(() => null)
-      : Promise.resolve(null)
+    const srcPromise: Promise<ClientSourcifyStatus> = sourcifyEnabled
+      ? fetchSourcifyWithFields(address, extraFields)
+          .catch(() => ({ result: null, notFound: false, unavailable: true }))
+      : Promise.resolve({ result: null, notFound: false })
 
     const proxyPromise: Promise<RawProxy | null> =
       isEnabled(sources, 'proxy') && rpc
@@ -120,9 +133,10 @@ export function createContractClient(config: ContractClientConfig): ContractClie
             .catch(() => null)
         : Promise.resolve(null)
 
-    const [repoRaw, uriResult, srcResult, rawProxy] = await Promise.all([
+    const [repoRaw, uriResult, srcStatus, rawProxy] = await Promise.all([
       repoPromise, uriPromise, srcPromise, proxyPromise,
     ])
+    const srcResult = srcStatus.result
 
     let repoResult = repoRaw
     if (repoResult?.includes) {
@@ -137,7 +151,13 @@ export function createContractClient(config: ContractClientConfig): ContractClie
     const merged = merge(sourcifyLayer, uriResult, repoResult)
 
     if (Object.keys(merged).length === 0 && !srcResult?.abi && !rawProxy) {
-      throw new ContractMetadataNotFoundError(chainId, address)
+      if (srcStatus.notFound) {
+        throw new ContractNotVerifiedOnSourcifyError(chainId, address)
+      }
+      throw new ContractMetadataNotFoundError(chainId, address, {
+        source: srcStatus.unavailable ? 'sourcify' : undefined,
+        reason: srcStatus.unavailable ? 'source-unavailable' : 'empty-response',
+      })
     }
 
     const result: ContractResult = {
@@ -230,8 +250,10 @@ export function createContractClient(config: ContractClientConfig): ContractClie
   async function fetchSourcifyWithFields(
     address: string,
     extraFields?: string[],
-  ): Promise<SourcifyResult | null> {
-    return fetchSrc(chainId, address, fetchFn, sourcifyUrl, extraFields)
+  ): Promise<SourcifyFetchStatus> {
+    return fetchSourcifyWithStatus(
+      chainId, address, fetchFn, sourcifyUrl, extraFields,
+    )
   }
 
   async function fetchSourcify(
@@ -292,7 +314,12 @@ export {
 // Per-source fetchers
 export { fetchRepository } from './sources/repository'
 export { fetchContractURI } from './sources/contract-uri'
-export { fetchSourcify, buildSourcifyLayer } from './sources/sourcify'
+export {
+  fetchSourcify,
+  fetchSourcifyWithStatus,
+  buildSourcifyLayer,
+} from './sources/sourcify'
+export type { SourcifyFetchStatus } from './sources/sourcify'
 
 // URI + ENS + RPC primitives
 export { resolveUri } from './uri'
@@ -310,7 +337,14 @@ export {
   ContractMetadataError,
   ContractMetadataFetchError,
   ContractMetadataNotFoundError,
+  ContractNotVerifiedOnSourcifyError,
   ENSResolutionError,
+} from './errors'
+
+export type {
+  ContractMetadataNotFoundOptions,
+  ContractMetadataNotFoundReason,
+  MetadataSource,
 } from './errors'
 
 // Types

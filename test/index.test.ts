@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { createContractClient, ContractMetadataNotFoundError } from '../src/index'
+import {
+  createContractClient,
+  ContractMetadataNotFoundError,
+  ContractNotVerifiedOnSourcifyError,
+} from '../src/index'
 import {
   encodeFacets,
   encodeBool,
@@ -150,15 +154,72 @@ describe('createContractClient', () => {
     expect(result.abi).toEqual([{ type: 'function', name: 'deposit' }])
   })
 
-  it('throws NotFoundError when all sources return null', async () => {
+  it('throws generic NotFoundError when Sourcify is disabled and no sources return metadata', async () => {
     const fetchFn = createMockFetch([]) // all 404
+
+    const client = createContractClient({
+      chainId: 1,
+      fetch: fetchFn,
+      sources: { sourcify: false },
+    })
+
+    let error: unknown
+    try {
+      await client.get(WETH)
+    } catch (cause) {
+      error = cause
+    }
+
+    expect(error).toBeInstanceOf(ContractMetadataNotFoundError)
+    expect(error).not.toBeInstanceOf(ContractNotVerifiedOnSourcifyError)
+    expect((error as ContractMetadataNotFoundError).source).toBeUndefined()
+    expect((error as ContractMetadataNotFoundError).reason).toBe('empty-response')
+  })
+
+  it('throws a specific error when Sourcify confirms no verification', async () => {
+    const fetchFn = createMockFetch([])
 
     const client = createContractClient({
       chainId: 1,
       fetch: fetchFn,
     })
 
-    await expect(client.get(WETH)).rejects.toBeInstanceOf(ContractMetadataNotFoundError)
+    let error: unknown
+    try {
+      await client.get(WETH)
+    } catch (cause) {
+      error = cause
+    }
+
+    expect(error).toBeInstanceOf(ContractNotVerifiedOnSourcifyError)
+    expect((error as ContractNotVerifiedOnSourcifyError).source).toBe('sourcify')
+    expect((error as ContractNotVerifiedOnSourcifyError).reason).toBe('not-verified')
+  })
+
+  it('keeps generic not-found when Sourcify lookup fails', async () => {
+    const fetchFn = createMockFetch([
+      {
+        match: url => url.includes('sourcify'),
+        response: { status: 500, body: null },
+      },
+    ])
+
+    const client = createContractClient({
+      chainId: 1,
+      fetch: fetchFn,
+    })
+
+    let error: unknown
+    try {
+      await client.get(WETH)
+    } catch (cause) {
+      error = cause
+    }
+
+    expect(error).toBeInstanceOf(ContractMetadataNotFoundError)
+    expect(error).not.toBeInstanceOf(ContractNotVerifiedOnSourcifyError)
+    expect((error as ContractMetadataNotFoundError).source).toBe('sourcify')
+    expect((error as ContractMetadataNotFoundError).reason).toBe('source-unavailable')
   })
 
   it('allows disabling sources via config', async () => {
@@ -221,11 +282,22 @@ describe('createContractClient', () => {
     const client = createContractClient({
       chainId: 1,
       fetch: fetchFn,
+      sources: { sourcify: false },
       // no rpc
     })
 
     // Should not throw about missing rpc, just skip contractURI
-    await expect(client.get(WETH)).rejects.toBeInstanceOf(ContractMetadataNotFoundError)
+    let error: unknown
+    try {
+      await client.get(WETH)
+    } catch (cause) {
+      error = cause
+    }
+
+    expect(error).toBeInstanceOf(ContractMetadataNotFoundError)
+    expect(error).not.toBeInstanceOf(ContractNotVerifiedOnSourcifyError)
+    expect((error as ContractMetadataNotFoundError).source).toBeUndefined()
+    expect((error as ContractMetadataNotFoundError).reason).toBe('empty-response')
   })
 
   it('exposes individual source fetchers', async () => {
