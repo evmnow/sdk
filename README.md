@@ -122,7 +122,7 @@ const result = await client.get('0x...', {
 })
 ```
 
-Throws `ContractMetadataNotFoundError` if no source returns any data.
+Throws `ContractMetadataNotFoundError` if no source returns any data. Not-found errors include structured `source` and `reason` fields when a single source gives a meaningful signal, such as a Sourcify 404.
 
 ### `client.fetchRepository(address)`
 
@@ -257,6 +257,7 @@ import {
 import {
   ContractMetadataError,
   ContractMetadataNotFoundError,
+  ContractNotVerifiedOnSourcifyError,
   ContractMetadataFetchError,
   ENSResolutionError,
 } from '@evmnow/sdk/errors'
@@ -287,6 +288,7 @@ Pass `{ sourcify: false }` to return only the on-chain address + selector topolo
 ```ts
 import {
   ContractMetadataNotFoundError,
+  ContractNotVerifiedOnSourcifyError,
   ContractMetadataFetchError,
   ENSResolutionError,
 } from '@evmnow/sdk'
@@ -294,8 +296,11 @@ import {
 try {
   const result = await client.get('0x...')
 } catch (e) {
-  if (e instanceof ContractMetadataNotFoundError) {
+  if (e instanceof ContractNotVerifiedOnSourcifyError) {
+    // Sourcify confirmed the contract is not verified
+  } else if (e instanceof ContractMetadataNotFoundError) {
     // No metadata found from any source
+    console.log(e.source, e.reason)
   }
   if (e instanceof ENSResolutionError) {
     // ENS name could not be resolved
