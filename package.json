@@ -62,7 +62,7 @@
     "changeset": "changeset"
   },
   "dependencies": {
-    "@1001-digital/proxies": "^0.1.0",
+    "@1001-digital/proxies": "^0.1.1",
     "@1001-digital/natspec": "^0.1.0",
     "@noble/hashes": "^1.7.0"
   },
