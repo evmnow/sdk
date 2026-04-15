@@ -115,6 +115,15 @@ describe('createContractClient', () => {
 
     // ABI from Sourcify
     expect(result.abi).toEqual([{ type: 'function', name: 'deposit' }])
+    expect(result.abiLayers).toEqual([
+      {
+        role: 'main',
+        address: WETH,
+        callAddress: WETH,
+        callMode: 'direct',
+        abi: [{ type: 'function', name: 'deposit' }],
+      },
+    ])
 
     // NatSpec raw objects
     expect(result.natspec?.userdoc).toBeTruthy()
@@ -555,6 +564,29 @@ describe('createContractClient', () => {
       expect(result.proxy?.targets[0].selectors).toEqual(['0xa9059cbb', '0x70a08231'])
       expect(result.proxy?.targets[1].address).toBe(FACET_B)
       expect(result.proxy?.targets[1].selectors).toEqual(['0x18160ddd'])
+      expect(result.abiLayers).toEqual([
+        {
+          role: 'facet',
+          address: FACET_A,
+          callAddress: DIAMOND,
+          callMode: 'delegatecall-through-proxy',
+          selectors: ['0xa9059cbb', '0x70a08231'],
+          pattern: 'eip-2535-diamond',
+          abi: [
+            { type: 'function', name: 'transfer', inputs: [{ type: 'address' }, { type: 'uint256' }] },
+            { type: 'function', name: 'balanceOf', inputs: [{ type: 'address' }] },
+          ],
+        },
+        {
+          role: 'facet',
+          address: FACET_B,
+          callAddress: DIAMOND,
+          callMode: 'delegatecall-through-proxy',
+          selectors: ['0x18160ddd'],
+          pattern: 'eip-2535-diamond',
+          abi: [{ type: 'function', name: 'totalSupply', inputs: [] }],
+        },
+      ])
 
       // Composite ABI has all three functions
       const fnNames = (result.abi as any[]).filter(f => f.type === 'function').map(f => f.name).sort()
@@ -1000,6 +1032,19 @@ describe('createContractClient', () => {
       expect(result.proxy?.targets).toHaveLength(1)
       expect(result.proxy?.targets[0].address).toBe(IMPL)
       expect(result.proxy?.targets[0].selectors).toBeUndefined()
+      expect(result.abiLayers).toEqual([
+        {
+          role: 'proxy-target',
+          address: IMPL,
+          callAddress: PROXY,
+          callMode: 'delegatecall-through-proxy',
+          pattern: 'eip-1967',
+          abi: [
+            { type: 'function', name: 'totalSupply', inputs: [] },
+            { type: 'function', name: 'transfer', inputs: [{ type: 'address' }, { type: 'uint256' }] },
+          ],
+        },
+      ])
 
       // Curated repo name wins at the metadata level
       expect(result.metadata.name).toBe('My Upgradeable Token')
