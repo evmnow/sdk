@@ -38,7 +38,7 @@ The SDK fetches metadata from four sources in parallel, then merges them with in
 
 | Priority | Source | What it provides |
 |----------|--------|-----------------|
-| Lowest | **Diamond facets** (ERC-2535) | Per-facet ABI + NatSpec, merged into a composite ABI and `result.facets` |
+| Lowest | **Diamonds and proxy targets** | ERC-2535 facet and proxy implementation ABI + NatSpec, merged into a composite ABI and `result.proxy` |
 | Low | **Sourcify** | ABI and function/event/error descriptions from NatSpec comments |
 | Medium | **contractURI** | On-chain ERC-7572 fields: name, symbol, description, image, links |
 | Highest | **Repository** | Curated JSON from the [evmnow/contract-metadata](https://github.com/evmnow/contract-metadata) repo — full control over every field |
@@ -53,7 +53,7 @@ const client = createContractClient({
   chainId: 1,
 
   // Optional
-  rpc: 'https://eth.llamarpc.com',        // needed for contractURI, diamond, ENS on mainnet
+  rpc: 'https://eth.llamarpc.com',        // needed for contractURI, diamonds/proxies, ENS on mainnet
   ensRpc: 'https://eth.llamarpc.com',     // mainnet RPC for ENS when chainId !== 1
   repositoryUrl: '...',                   // custom metadata repo base URL
   sourcifyUrl: 'https://sourcify.dev/server',
@@ -65,12 +65,12 @@ const client = createContractClient({
     repository: true,   // default: true
     contractURI: true,  // default: true (requires rpc)
     sourcify: true,     // default: true
-    diamond: true,      // default: true (requires rpc)
+    proxy: true,        // default: true (requires rpc; detects ERC-2535 diamonds and proxies)
   },
 
   // Opt-in fields that aren't included by default
   include: {
-    sources: false,           // verified source files from Sourcify
+    sources: false,           // verified source files from Sourcify, including proxy targets
     deployedBytecode: false,  // deployed bytecode from Sourcify
   },
 })
@@ -101,13 +101,21 @@ interface ContractResult {
   natspec?: NatSpec                   // raw userdoc/devdoc (merged across facets)
   sources?: Record<string, string>    // verified source files (requires include.sources)
   deployedBytecode?: string           // deployed bytecode (requires include.deployedBytecode)
-  facets?: FacetInfo[]                // per-facet info when the contract is an ERC-2535 diamond
+  proxy?: ProxyResolution             // resolved ERC-2535 facets / proxy implementations
 }
 
-interface FacetInfo {
+interface TargetInfo {
   address: string
-  selectors: string[]
-  abi?: unknown[]      // the facet's ABI filtered to its mounted selectors
+  selectors?: string[] // defined for diamond facets
+  abi?: unknown[]      // filtered to selectors for diamond facets
+  natspec?: NatSpec
+  sources?: Record<string, string> // requires include.sources
+}
+
+interface ProxyResolution {
+  pattern: ProxyPattern
+  targets: TargetInfo[]
+  compositeAbi?: unknown[]
   natspec?: NatSpec
 }
 ```
@@ -136,24 +144,25 @@ Fetch only the on-chain contractURI. Returns `null` if not found or no RPC confi
 
 Fetch only from Sourcify. Always requests `sources` and `deployedBytecode` alongside the base fields, and returns the raw `SourcifyResult` (ABI, parsed NatSpec, sources, bytecode).
 
-### `client.fetchDiamond(address, options?)`
+### `client.fetchProxy(address, options?)`
 
-Resolve ERC-2535 Diamond facets for an address without running the full merge pipeline. Returns `null` if the contract is not a diamond or no RPC is configured; otherwise returns a `DiamondResolution`:
+Resolve ERC-2535 diamond facets or proxy implementation targets without running the full merge pipeline. Returns `null` if the contract is not a supported diamond/proxy or no RPC is configured; otherwise returns a `ProxyResolution`:
 
 ```ts
-interface DiamondResolution {
-  facets: FacetInfo[]         // address + selectors, plus ABI / NatSpec when Sourcify is enabled
-  compositeAbi?: unknown[]    // deduped ABI across every facet
-  natspec?: NatSpec           // merged userdoc/devdoc across facets
+interface ProxyResolution {
+  pattern: ProxyPattern
+  targets: TargetInfo[]       // ERC-2535 facets or proxy implementations, plus ABI / NatSpec when Sourcify is enabled
+  compositeAbi?: unknown[]    // deduped ABI across every target
+  natspec?: NatSpec           // merged userdoc/devdoc across targets
   metadataLayer?: Partial<ContractMetadataDocument>  // functions/events/errors ready to merge
 }
 ```
 
-Per-facet Sourcify lookups can be skipped when you only need the topology:
+Per-target Sourcify lookups can be skipped when you only need the topology:
 
 ```ts
 // Addresses + selectors only — no Sourcify traffic
-const diamond = await client.fetchDiamond('0x...', { sourcify: false })
+const proxy = await client.fetchProxy('0x...', { sourcify: false })
 ```
 
 ### `merge(...layers)`
@@ -216,16 +225,19 @@ Repository metadata can reference shared interfaces via the `includes` field:
 
 Interfaces are fetched from the schema repo and merged as a base layer, with the document's own fields taking priority.
 
-## Diamonds (ERC-2535)
+## Diamonds (ERC-2535) and Proxies
 
-When the `diamond` source is enabled and an `rpc` is configured, the SDK detects [ERC-2535](https://eips.ethereum.org/EIPS/eip-2535) diamonds via `supportsInterface(0x48e2b093)` with a `facets()` fallback. For each live facet, it fetches Sourcify separately, filters the facet's ABI to its mounted selectors, and expands the result:
+ERC-2535 diamond support is first-class. When the `proxy` source is enabled and an `rpc` is configured, the SDK detects diamonds via `supportsInterface(0x48e2b093)` with a `facets()` fallback, then returns `result.proxy.pattern === 'eip-2535-diamond'`. Each live facet is represented in `result.proxy.targets` with its address and selectors.
 
-- `result.facets` — one entry per facet with its address, selectors, filtered ABI, and NatSpec
-- `result.abi` — composite ABI across the main diamond + every facet (first-occurrence wins, deduped by selector for functions and by signature for events/errors)
-- `result.natspec` — `userdoc` / `devdoc` merged across the diamond and its facets, main doc taking priority
-- `result.metadata.functions` / `events` / `errors` — NatSpec-derived sections from every facet layered in at lowest priority, so curated repo/contractURI/main-Sourcify fields still win
+The same pipeline also handles common single-implementation proxy patterns. For each diamond facet or proxy implementation, the SDK fetches Sourcify separately, filters diamond facet ABIs to mounted selectors, and expands the result:
 
-Facets are fetched directly from Sourcify (not recursively through `client.get`), which guards against facets that themselves look like diamonds. Setting `sources.sourcify: false` skips per-facet Sourcify traffic as well — the facets list still contains addresses and selectors, but `abi` and `natspec` are omitted.
+- `result.proxy.targets` — one entry per diamond facet or proxy implementation with its address, optional selectors, ABI, NatSpec, and source files when requested
+- `result.abi` — composite ABI across the main contract + every target (first-occurrence wins, deduped by selector for functions and by signature for events/errors)
+- `result.natspec` — `userdoc` / `devdoc` merged across the main contract and targets, main doc taking priority
+- `result.sources` — main contract source files plus target source files when `include.sources` is enabled; for an unverified proxy with one verified implementation, this is the implementation source map
+- `result.metadata.functions` / `events` / `errors` — NatSpec-derived sections from every target layered in at lowest priority, so curated repo/contractURI/main-Sourcify fields still win
+
+Targets are fetched directly from Sourcify (not recursively through `client.get`), which guards against facets or implementations that themselves look like proxies. Setting `sources.sourcify: false` skips per-target Sourcify traffic as well — the target list still contains addresses and selectors, but ABI, NatSpec, and sources are omitted.
 
 ## Modular imports
 
@@ -240,10 +252,11 @@ import { fetchRepository } from '@evmnow/sdk/sources/repository'
 import { fetchContractURI } from '@evmnow/sdk/sources/contract-uri'
 import { fetchSourcify, buildSourcifyLayer } from '@evmnow/sdk/sources/sourcify'
 import {
-  fetchDiamond,
-  detectAndFetchFacets,
-  enrichFacets,
-  composeDiamondResolution,
+  fetchProxy,
+  detectProxy,
+  detectDiamond,
+  enrichTargets,
+  composeProxyResolution,
   decodeFacets,
   computeSelector,
   canonicalSignature,
@@ -253,7 +266,7 @@ import {
   DIAMOND_LOUPE_INTERFACE_ID,
   SUPPORTS_INTERFACE_SELECTOR,
   FACETS_SELECTOR,
-} from '@evmnow/sdk/sources/diamond'
+} from '@evmnow/sdk/sources/proxy'
 import {
   ContractMetadataError,
   ContractMetadataNotFoundError,
@@ -265,19 +278,19 @@ import {
 
 Every symbol above is also re-exported from the barrel (`@evmnow/sdk`).
 
-### Standalone diamond resolution
+### Standalone diamond/proxy resolution
 
-When you only need facet info for an ERC-2535 diamond, skip the client entirely:
+When you only need diamond facet or proxy implementation topology, skip the client entirely:
 
 ```ts
-import { fetchDiamond } from '@evmnow/sdk/sources/diamond'
+import { fetchProxy } from '@evmnow/sdk/sources/proxy'
 
-const diamond = await fetchDiamond(
+const proxy = await fetchProxy(
   'https://eth.llamarpc.com',   // rpc
   1,                            // chainId
-  '0x...',                      // diamond address
+  '0x...',                      // diamond or proxy address
   fetch,                        // fetch implementation
-  { sourcifyUrl: 'https://sourcify.dev/server', sourcify: true },
+  { sourcifyUrl: 'https://sourcify.dev/server', sourcify: true, sources: true },
 )
 ```
 

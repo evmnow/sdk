@@ -497,6 +497,10 @@ describe('createContractClient', () => {
         { address: FACET_A, selectors: ['0xa9059cbb', '0x70a08231'] }, // transfer, balanceOf
         { address: FACET_B, selectors: ['0x18160ddd'] },               // totalSupply
       ])
+      const facetSources = {
+        [`facets/${FACET_A}/contracts/FacetA.sol`]: 'contract FacetA {}',
+        [`facets/${FACET_B}/contracts/FacetB.sol`]: 'contract FacetB {}',
+      }
 
       const fetchFn = createMockFetch([
         // Main diamond Sourcify: not verified
@@ -513,6 +517,9 @@ describe('createContractClient', () => {
               ],
               userdoc: { methods: { 'transfer(address,uint256)': { notice: 'move tokens' } } },
               devdoc: { methods: {} },
+              sources: {
+                'contracts/FacetA.sol': { content: 'contract FacetA {}' },
+              },
             },
           },
         },
@@ -525,6 +532,9 @@ describe('createContractClient', () => {
               abi: [{ type: 'function', name: 'totalSupply', inputs: [] }],
               userdoc: { methods: { 'totalSupply()': { notice: 'total supply' } } },
               devdoc: { methods: {} },
+              sources: {
+                'contracts/FacetB.sol': { content: 'contract FacetB {}' },
+              },
             },
           },
         },
@@ -548,7 +558,7 @@ describe('createContractClient', () => {
         fetch: fetchFn,
       })
 
-      const result = await client.get(DIAMOND)
+      const result = await client.get(DIAMOND, { include: { sources: true } })
       expect(result.proxy?.pattern).toBe('eip-2535-diamond')
       expect(result.proxy?.targets).toHaveLength(2)
       expect(result.proxy?.targets[0].address).toBe(FACET_A)
@@ -563,6 +573,9 @@ describe('createContractClient', () => {
       // NatSpec merged across facets → metadata.functions populated for both
       expect(result.metadata.functions?.['transfer']).toBeTruthy()
       expect(result.metadata.functions?.['totalSupply']).toBeTruthy()
+
+      // Source files are namespaced by facet address
+      expect(result.sources).toEqual(facetSources)
     })
 
     it('falls back to facets() probe when ERC-165 errors', async () => {
@@ -1010,6 +1023,80 @@ describe('createContractClient', () => {
 
       // NatSpec comes from the implementation
       expect(result.natspec?.userdoc).toBeTruthy()
+    })
+
+    it('includes implementation source files for proxies when requested', async () => {
+      const PROXY = '0x2222222222222222222222222222222222222222'
+      const IMPL = '0x' + 'cc'.repeat(20)
+      const implSources = {
+        'contracts/Implementation.sol': 'contract Implementation {}',
+        'contracts/Library.sol': 'library Library {}',
+      }
+
+      const fetchFn = createMockFetch([
+        // Main proxy Sourcify: not verified
+        {
+          match: url => url.includes('sourcify') && url.includes(PROXY),
+          response: { status: 404, body: null },
+        },
+        // Sourcify on the implementation: verified with ABI + source files
+        {
+          match: url => url.includes('sourcify') && url.includes(IMPL),
+          response: {
+            status: 200,
+            body: {
+              abi: [{ type: 'function', name: 'implementationFn', inputs: [] }],
+              userdoc: { methods: {} },
+              devdoc: { methods: {} },
+              sources: Object.fromEntries(
+                Object.entries(implSources).map(([path, content]) => [
+                  path,
+                  { content },
+                ]),
+              ),
+            },
+          },
+        },
+        // Diamond probe returns false
+        {
+          match: (url, body) => url.includes('rpc.test')
+            && getCalldata(body).startsWith('0x01ffc9a7'),
+          response: { status: 200, body: rpcEnvelope(encodeBool(false)) },
+        },
+        // EIP-1967 impl slot is set
+        {
+          match: (url, body) =>
+            url.includes('rpc.test')
+            && body.includes('"method":"eth_getStorageAt"')
+            && body.toLowerCase().includes('0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc'),
+          response: { status: 200, body: rpcEnvelope('0x' + IMPL.replace(/^0x/, '').padStart(64, '0')) },
+        },
+        // EIP-1967 admin slot is empty
+        {
+          match: (url, body) =>
+            url.includes('rpc.test')
+            && body.includes('"method":"eth_getStorageAt"')
+            && body.toLowerCase().includes('0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103'),
+          response: { status: 200, body: rpcEnvelope('0x' + '00'.repeat(32)) },
+        },
+      ])
+
+      const client = createContractClient({
+        chainId: 1,
+        rpc: 'https://rpc.test',
+        fetch: fetchFn,
+        sources: { repository: false, contractURI: false },
+      })
+
+      const result = await client.get(PROXY, { include: { sources: true } })
+
+      expect(result.sources).toEqual(implSources)
+      expect(result.proxy?.targets[0].sources).toEqual(implSources)
+
+      const implementationSourcifyCall = (fetchFn as any).mock.calls
+        .map((call: any) => call[0])
+        .find((url: string) => url.includes('sourcify') && url.includes(IMPL))
+      expect(implementationSourcifyCall).toContain('sources')
     })
   })
 

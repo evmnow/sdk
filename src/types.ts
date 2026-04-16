@@ -232,13 +232,14 @@ export interface NatSpec {
 
 export type { ProxyPattern, ResolvedTarget, RawProxy } from '@1001-digital/proxies'
 
-/** An implementation target behind a proxy, enriched with ABI + NatSpec. */
+/** An implementation target behind a proxy, enriched with Sourcify data when available. */
 export interface TargetInfo {
   address: string
   /** Defined for diamond facets; undefined for single-impl proxies (all selectors). */
   selectors?: string[]
   abi?: unknown[]
   natspec?: NatSpec
+  sources?: Record<string, string>
 }
 
 export interface ProxyResolution {
@@ -261,6 +262,8 @@ export interface ProxyResolution {
 export interface FetchProxyOptions {
   /** Fetch Sourcify for each target to populate ABI + NatSpec. Default: true. */
   sourcify?: boolean
+  /** Include verified source files for each target when Sourcify is enabled. */
+  sources?: boolean
 }
 
 // ── Client ──
