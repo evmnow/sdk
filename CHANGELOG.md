@@ -1,5 +1,11 @@
 # @evmnow/sdk
 
+## 0.1.4
+
+### Patch Changes
+
+- [#8](https://github.com/evmnow/sdk/pull/8) [`af2eb8b`](https://github.com/evmnow/sdk/commit/af2eb8b374c96ccecc1335f12039f466fdb5cde2) Thanks [@yougogirldoteth](https://github.com/yougogirldoteth)! - Include verified source files for proxy targets when `include.sources` is enabled.
+
 ## 0.1.3
 
 ### Patch Changes
