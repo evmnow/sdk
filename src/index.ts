@@ -10,6 +10,7 @@ import type {
   RawProxy,
   SourcifyResult,
   SourceConfig,
+  TargetInfo,
 } from './types'
 import {
   ContractMetadataNotFoundError,
@@ -175,7 +176,14 @@ export function createContractClient(config: ContractClientConfig): ContractClie
 
     if (rawProxy) {
       await expandProxy(
-        result, rawProxy, sourcifyEnabled, srcResult, sourcifyLayer, uriResult, repoResult,
+        result,
+        rawProxy,
+        sourcifyEnabled,
+        include.sources === true,
+        srcResult,
+        sourcifyLayer,
+        uriResult,
+        repoResult,
       )
     }
 
@@ -186,6 +194,7 @@ export function createContractClient(config: ContractClientConfig): ContractClie
     result: ContractResult,
     rawProxy: RawProxy,
     sourcifyEnabled: boolean,
+    includeSources: boolean,
     srcResult: SourcifyResult | null,
     sourcifyLayer: Partial<ContractMetadataDocument> | null,
     uriResult: Partial<ContractMetadataDocument> | null,
@@ -194,7 +203,14 @@ export function createContractClient(config: ContractClientConfig): ContractClie
     // Fetch Sourcify directly per target (not through client.get) — this is
     // the structural single-hop guard. Skipped entirely when Sourcify is disabled.
     const sourcifyFetch = sourcifyEnabled
-      ? (a: string) => fetchSrc(chainId, a, fetchFn, sourcifyUrl)
+      ? (a: string) =>
+          fetchSrc(
+            chainId,
+            a,
+            fetchFn,
+            sourcifyUrl,
+            includeSources ? ['sources'] : undefined,
+          )
       : null
 
     const { targets, sourcifyResults } = await enrichTargets(rawProxy.targets, sourcifyFetch)
@@ -204,6 +220,7 @@ export function createContractClient(config: ContractClientConfig): ContractClie
     if (rawProxy.beacon) proxy.beacon = rawProxy.beacon
     if (rawProxy.admin) proxy.admin = rawProxy.admin
     result.proxy = proxy
+    mergeProxySources(result, proxy)
 
     // Composite ABI: main contract first (it may legitimately mount admin/loupe
     // functions itself), then each target's filtered ABI. First-occurrence wins.
@@ -271,10 +288,42 @@ export function createContractClient(config: ContractClientConfig): ContractClie
     return fetchProxySource(rpc, chainId, address, fetchFn, {
       sourcifyUrl,
       sourcify: options?.sourcify,
+      sources: options?.sources,
     })
   }
 
   return { get, fetchRepository, fetchContractURI, fetchSourcify, fetchProxy }
+}
+
+function mergeProxySources(result: ContractResult, proxy: ProxyResolution): void {
+  const sourceTargets = proxy.targets.filter(
+    (target): target is TargetInfo & { sources: Record<string, string> } =>
+      !!target.sources && Object.keys(target.sources).length > 0,
+  )
+  if (!sourceTargets.length) return
+
+  const existingSources = result.sources ?? {}
+  const hasExistingSources = Object.keys(existingSources).length > 0
+  const merged: Record<string, string> = { ...existingSources }
+
+  for (const target of sourceTargets) {
+    const isFacet = target.selectors !== undefined
+    const prefixTargetPaths = hasExistingSources || sourceTargets.length > 1 || isFacet
+    const prefix = isFacet
+      ? `facets/${target.address}`
+      : `implementations/${target.address}`
+
+    for (const [path, content] of Object.entries(target.sources)) {
+      const targetPath = prefixTargetPaths ? joinSourcePath(prefix, path) : path
+      merged[targetPath] = content
+    }
+  }
+
+  result.sources = merged
+}
+
+function joinSourcePath(prefix: string, path: string): string {
+  return `${prefix}/${path.replace(/^\/+/, '')}`
 }
 
 // ── Re-exports ──
