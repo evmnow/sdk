@@ -3,7 +3,7 @@ import type { SourcifyUserDoc, SourcifyDevDoc } from '@1001-digital/natspec'
 import type {
   ContractMetadataDocument,
   SourcifyResult,
-  FunctionMeta,
+  ActionMeta,
   EventMeta,
   ErrorMeta,
 } from '../types'
@@ -97,8 +97,16 @@ export async function fetchSourcifyWithStatus(
       Object.entries(data.sources).map(([path, src]) => [path, src.content]),
     )
   }
+  // Convert NatSpec-derived `functions` (keyed by name/signature) into the
+  // `actions` shape: each action's identifier is the original key, and a
+  // `function` field references the same ABI entry. This is a 1:1 mapping —
+  // NatSpec has no notion of variants, so every derived action is a default.
   if (metadata.functions && Object.keys(metadata.functions).length > 0) {
-    result.functions = metadata.functions as Record<string, FunctionMeta>
+    const actions: Record<string, ActionMeta> = {}
+    for (const [key, fn] of Object.entries(metadata.functions)) {
+      actions[key] = { function: key, ...(fn as Omit<ActionMeta, 'function'>) }
+    }
+    result.actions = actions
   }
   if (metadata.events && Object.keys(metadata.events).length > 0) {
     result.events = metadata.events as Record<string, EventMeta>
@@ -114,14 +122,14 @@ export async function fetchSourcifyWithStatus(
 }
 
 /**
- * Extract the metadata-doc layer (functions/events/errors) from a SourcifyResult.
+ * Extract the metadata-doc layer (actions/events/errors) from a SourcifyResult.
  * Returns null when the SourcifyResult has no NatSpec-derived sections.
  */
 export function buildSourcifyLayer(
   src: SourcifyResult,
 ): Partial<ContractMetadataDocument> | null {
   const layer: Partial<ContractMetadataDocument> = {}
-  if (src.functions) layer.functions = src.functions
+  if (src.actions) layer.actions = src.actions
   if (src.events) layer.events = src.events
   if (src.errors) layer.errors = src.errors
   return Object.keys(layer).length > 0 ? layer : null

@@ -32,8 +32,8 @@ describe('createContractClient', () => {
   it('resolves from all three sources', async () => {
     const repoMetadata = {
       name: 'Wrapped Ether',
-      functions: {
-        deposit: { title: 'Wrap ETH', description: 'curated' },
+      actions: {
+        deposit: { function: 'deposit', title: 'Wrap ETH', description: 'curated' },
       },
     }
 
@@ -107,11 +107,11 @@ describe('createContractClient', () => {
     // contractURI provides symbol and image
     expect(result.metadata.symbol).toBe('WETH')
     expect(result.metadata.image).toBe('https://example.com/weth.png')
-    // Repository's curated function takes priority
-    expect(result.metadata.functions?.deposit).toEqual({ title: 'Wrap ETH', description: 'curated' })
-    // Sourcify/NatSpec fills in functions not in repo
-    expect(result.metadata.functions?.withdraw).toBeTruthy()
-    expect(result.metadata.functions?.withdraw?.description).toBe('Withdraw WETH to ETH')
+    // Repository's curated action takes priority
+    expect(result.metadata.actions?.deposit).toEqual({ function: 'deposit', title: 'Wrap ETH', description: 'curated' })
+    // Sourcify/NatSpec fills in actions not in repo
+    expect(result.metadata.actions?.withdraw).toBeTruthy()
+    expect(result.metadata.actions?.withdraw?.description).toBe('Withdraw WETH to ETH')
 
     // ABI from Sourcify
     expect(result.abi).toEqual([{ type: 'function', name: 'deposit' }])
@@ -560,9 +560,9 @@ describe('createContractClient', () => {
       const fnNames = (result.abi as any[]).filter(f => f.type === 'function').map(f => f.name).sort()
       expect(fnNames).toEqual(['balanceOf', 'totalSupply', 'transfer'])
 
-      // NatSpec merged across facets → metadata.functions populated for both
-      expect(result.metadata.functions?.['transfer']).toBeTruthy()
-      expect(result.metadata.functions?.['totalSupply']).toBeTruthy()
+      // NatSpec merged across facets → metadata.actions populated for both
+      expect(result.metadata.actions?.['transfer']).toBeTruthy()
+      expect(result.metadata.actions?.['totalSupply']).toBeTruthy()
     })
 
     it('falls back to facets() probe when ERC-165 errors', async () => {

@@ -22,7 +22,7 @@ const result = await client.get('0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984')
 
 console.log(result.metadata.name)        // "Uniswap"
 console.log(result.metadata.description) // ...
-console.log(result.metadata.functions)   // { "delegate(address)": { title: "...", ... }, ... }
+console.log(result.metadata.actions)     // { "delegate": { function: "delegate(address)", title: "...", ... }, ... }
 console.log(result.abi)                  // full ABI from Sourcify (composite for diamonds)
 ```
 
@@ -43,7 +43,7 @@ The SDK fetches metadata from four sources in parallel, then merges them with in
 | Medium | **contractURI** | On-chain ERC-7572 fields: name, symbol, description, image, links |
 | Highest | **Repository** | Curated JSON from the [evmnow/contract-metadata](https://github.com/evmnow/contract-metadata) repo — full control over every field |
 
-Higher-priority sources override lower ones. Record sections (`functions`, `events`, `errors`, `messages`, `groups`) are shallow-merged per key, so a repository entry can add a `title` to a function while keeping the NatSpec `description` from Sourcify.
+Higher-priority sources override lower ones. Record sections (`actions`, `events`, `errors`, `messages`, `groups`) are shallow-merged per key, so a repository entry can add a `title` to an action while keeping the NatSpec `description` from Sourcify.
 
 ## Configuration
 
@@ -145,7 +145,7 @@ interface DiamondResolution {
   facets: FacetInfo[]         // address + selectors, plus ABI / NatSpec when Sourcify is enabled
   compositeAbi?: unknown[]    // deduped ABI across every facet
   natspec?: NatSpec           // merged userdoc/devdoc across facets
-  metadataLayer?: Partial<ContractMetadataDocument>  // functions/events/errors ready to merge
+  metadataLayer?: Partial<ContractMetadataDocument>  // actions/events/errors ready to merge
 }
 ```
 
@@ -193,7 +193,7 @@ interface ContractMetadataDocument {
   audits?: AuditReference[]
   theme?: Theme
   groups?: Record<string, Group>
-  functions?: Record<string, FunctionMeta>
+  actions?: Record<string, ActionMeta>
   events?: Record<string, EventMeta>
   errors?: Record<string, ErrorMeta>
   messages?: Record<string, MessageMeta>
@@ -201,7 +201,7 @@ interface ContractMetadataDocument {
 }
 ```
 
-Function metadata includes fields like `title`, `description`, `intent`, `warning`, `params` (with types, labels, validation, autofill), `examples`, and more. See `src/types.ts` for the full type definitions.
+Action metadata includes a required `function` field (the ABI function the action invokes, by name/signature/selector) plus optional `title`, `description`, `intent`, `warning`, `params` (with types, labels, validation, autofill, `hidden`, `disabled`), `examples`, and more. Multiple actions may target the same ABI function as variants (`approve`, `approve-max`, `revoke`). See `src/types.ts` for full type definitions, and `resolveActions(abi, doc)` to turn a metadata document into a ready-to-render list of `ResolvedAction` entries.
 
 ## Includes (interfaces)
 
@@ -223,7 +223,7 @@ When the `diamond` source is enabled and an `rpc` is configured, the SDK detects
 - `result.facets` — one entry per facet with its address, selectors, filtered ABI, and NatSpec
 - `result.abi` — composite ABI across the main diamond + every facet (first-occurrence wins, deduped by selector for functions and by signature for events/errors)
 - `result.natspec` — `userdoc` / `devdoc` merged across the diamond and its facets, main doc taking priority
-- `result.metadata.functions` / `events` / `errors` — NatSpec-derived sections from every facet layered in at lowest priority, so curated repo/contractURI/main-Sourcify fields still win
+- `result.metadata.actions` / `events` / `errors` — NatSpec-derived sections from every facet layered in at lowest priority, so curated repo/contractURI/main-Sourcify fields still win
 
 Facets are fetched directly from Sourcify (not recursively through `client.get`), which guards against facets that themselves look like diamonds. Setting `sources.sourcify: false` skips per-facet Sourcify traffic as well — the facets list still contains addresses and selectors, but `abi` and `natspec` are omitted.
 
