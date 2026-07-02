@@ -9,7 +9,7 @@ type RecordSection = typeof RECORD_SECTIONS[number]
  * Merge metadata layers with increasing priority.
  * Pass layers from lowest to highest priority.
  * Scalar fields: highest non-undefined wins.
- * Record sections (functions, events, etc.): shallow merge per key.
+ * Record sections (actions, events, etc.): shallow merge per key.
  */
 export function merge(
   ...layers: (Partial<ContractMetadataDocument> | null | undefined)[]

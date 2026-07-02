@@ -210,7 +210,12 @@ interface ContractMetadataDocument {
 }
 ```
 
-Action metadata includes a required `function` field (the ABI function the action invokes, by name/signature/selector) plus optional `title`, `description`, `intent`, `warning`, `params` (with types, labels, validation, autofill, `hidden`, `disabled`), `examples`, and more. Multiple actions may target the same ABI function as variants (`approve`, `approve-max`, `revoke`). See `src/types.ts` for full type definitions, and `resolveActions(abi, doc)` to turn a metadata document into a ready-to-render list of `ResolvedAction` entries.
+Actions are keyed by a free-form identifier and reference the ABI function they invoke via an optional `function` field (bare name, full signature, or 4-byte selector; when omitted, the action's id is used as the reference). Each action may carry `title`, `description`, `intent`, `warning`, `params` (with types, labels, validation, autofill, `hidden`, `disabled`), a `value` object describing the native currency sent with a payable call, `examples`, and more. Multiple actions may target the same ABI function as variants (`approve`, `approve-max`, `revoke`). See `src/types.ts` for full type definitions.
+
+Two pure helpers turn the document into UI-ready data:
+
+- `resolveActions(abi, doc)` — returns a ready-to-render list of `ResolvedAction` entries: every authored action resolved to its ABI function, plus a synthesized default for each ABI function no authored action references. Non-fatal authoring problems (unresolved refs, locked params without autofill, `value` on non-payable functions) are reported as `issues`.
+- `matchAction(actions, call)` — resolves a decoded transaction to the most specific action for confirmation previews and history views. Locked parameters (hidden/disabled with a resolvable autofill) act as equality constraints against the decoded arguments; the surviving candidate with the most locked parameters wins, with deterministic tie-breaks (lowest `order`, then smallest id). Decode calldata with your own ABI tooling — the SDK matches on decoded values.
 
 ## Includes (interfaces)
 

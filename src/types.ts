@@ -81,17 +81,43 @@ export interface ActionMeta {
   warning?: string
   featured?: boolean
   /**
-   * Hide this action from the default UI. Also used to suppress an
-   * ABI-synthesized default action when only authored variants should render.
+   * Hide this action from the default UI. If every authored action
+   * referencing a function is hidden, the function itself is hidden — no
+   * synthesized default is created for it.
    */
   hidden?: boolean
+  /** Overrides the ABI's stateMutability. Only for correcting legacy ABIs that lack the field. */
   stateMutability?: 'view' | 'pure' | 'nonpayable' | 'payable'
   params?: Record<string, ParamMeta>
+  /**
+   * Metadata for the native currency (msg.value) sent with the call.
+   * Only meaningful on payable functions.
+   */
+  value?: ValueMeta
   returns?: Record<string, ParamMeta>
   examples?: ActionExample[]
   /** Identifiers of related actions (keys in the top-level `actions` object). */
   related?: string[]
   deprecated?: string
+  [key: `_${string}`]: unknown
+}
+
+/**
+ * Metadata for the native currency (msg.value) sent with a payable call.
+ * Always denominated in wei and rendered as the `eth` semantic type — hence
+ * no `type` field. Shares lock semantics (`hidden`/`disabled` + `autofill`)
+ * with parameters.
+ */
+export interface ValueMeta {
+  label?: string
+  description?: string
+  /** Pre-populate the value input. A constant is denominated in wei. */
+  autofill?: Autofill
+  validation?: ValidationRule
+  /** Do not render a value input; the `autofill` value is attached at call time. REQUIRES `autofill`. */
+  hidden?: boolean
+  /** Render the value input non-editable (e.g. a fixed mint price). REQUIRES `autofill`. Mutually exclusive with `hidden`. */
+  disabled?: boolean
   [key: `_${string}`]: unknown
 }
 

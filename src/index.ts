@@ -413,8 +413,8 @@ export type {
   MetadataSource,
 } from './errors'
 
-// Action resolution
-export { resolveActions } from './actions'
+// Action resolution + calldata matching
+export { resolveActions, matchAction } from './actions'
 export type {
   AbiFunction,
   AbiParam,
@@ -422,6 +422,7 @@ export type {
   ActionResolutionIssue,
   ActionResolutionResult,
   ActionIssueCode,
+  DecodedCall,
 } from './actions'
 
 // Types
@@ -447,6 +448,7 @@ export type {
   AuditReference,
   Group,
   ActionMeta,
+  ValueMeta,
   EventMeta,
   ErrorMeta,
   MessageMeta,
