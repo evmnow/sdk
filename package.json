@@ -14,6 +14,10 @@
       "types": "./dist/merge.d.ts",
       "import": "./dist/merge.js"
     },
+    "./format": {
+      "types": "./dist/format.d.ts",
+      "import": "./dist/format.js"
+    },
     "./uri": {
       "types": "./dist/uri.d.ts",
       "import": "./dist/uri.js"

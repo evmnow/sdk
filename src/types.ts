@@ -123,6 +123,7 @@ export type ParamType =
   | 'datetime' | 'hidden'
   | AddressType
   | TokenAmountType
+  | AmountType
   | TokenIdType
   | EnumType
   | SliderType
@@ -136,6 +137,18 @@ export interface AddressType {
 export interface TokenAmountType {
   type: 'token-amount'
   tokenAddress: string
+}
+
+/**
+ * Generic fixed-point amount with no asset identity (oracle prices, share
+ * prices, accounting units). Display value = raw / 10^decimals.
+ */
+export interface AmountType {
+  type: 'amount'
+  /** Fixed-point decimals. Default: 18. */
+  decimals?: number
+  /** Unit label shown after the value (e.g. "USD"). Optional. */
+  symbol?: string
 }
 
 export interface TokenIdType {

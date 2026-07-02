@@ -331,6 +331,23 @@ function joinSourcePath(prefix: string, path: string): string {
 // Pure merge utilities
 export { merge, resolveIncludes } from './merge'
 
+// Pure amount-formatting utilities (eth/gwei/amount/token-amount)
+export {
+  amountKind,
+  isAmountType,
+  resolveAmountDisplay,
+  formatUnits,
+  parseUnits,
+  formatAmount,
+  parseAmount,
+} from './format'
+export type {
+  AmountKind,
+  TokenInfo,
+  AmountDisplay,
+  FormatAmountOptions,
+} from './format'
+
 // Proxy utilities
 export {
   fetchProxy,
@@ -424,6 +441,8 @@ export type {
   MessageMeta,
   ParamMeta,
   ParamType,
+  AmountType,
+  TokenAmountType,
   Autofill,
   ValidationRule,
   ParamPreview,
