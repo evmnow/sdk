@@ -80,6 +80,9 @@ export async function enrichTargets(
     if (src?.userdoc || src?.devdoc) {
       info.natspec = { userdoc: src.userdoc, devdoc: src.devdoc }
     }
+    if (src?.sources) {
+      info.sources = src.sources
+    }
     return info
   })
 
@@ -135,14 +138,21 @@ export async function fetchProxy(
   chainId: number,
   address: string,
   fetchFn: typeof fetch,
-  options: { sourcify?: boolean; sourcifyUrl?: string } = {},
+  options: { sourcify?: boolean; sourcifyUrl?: string; sources?: boolean } = {},
 ): Promise<ProxyResolution | null> {
   const raw: RawProxy | null = await detectProxy(rpc, address, fetchFn)
   if (!raw) return null
 
   const sourcifyEnabled = options.sourcify !== false
   const sourcifyFetch = sourcifyEnabled
-    ? (a: string) => fetchSourcify(chainId, a, fetchFn, options.sourcifyUrl)
+    ? (a: string) =>
+        fetchSourcify(
+          chainId,
+          a,
+          fetchFn,
+          options.sourcifyUrl,
+          options.sources ? ['sources'] : undefined,
+        )
     : null
 
   const { targets, sourcifyResults } = await enrichTargets(raw.targets, sourcifyFetch)

@@ -1,6 +1,6 @@
 {
   "name": "@evmnow/sdk",
-  "version": "0.1.1",
+  "version": "0.1.4",
   "license": "MIT",
   "packageManager": "pnpm@10.33.0",
   "type": "module",
@@ -13,6 +13,10 @@
     "./merge": {
       "types": "./dist/merge.d.ts",
       "import": "./dist/merge.js"
+    },
+    "./format": {
+      "types": "./dist/format.d.ts",
+      "import": "./dist/format.js"
     },
     "./uri": {
       "types": "./dist/uri.d.ts",
@@ -62,7 +66,7 @@
     "changeset": "changeset"
   },
   "dependencies": {
-    "@1001-digital/proxies": "^0.1.0",
+    "@1001-digital/proxies": "^0.1.1",
     "@1001-digital/natspec": "^0.1.0",
     "@noble/hashes": "^1.7.0"
   },

@@ -12,8 +12,8 @@ importers:
         specifier: ^0.1.0
         version: 0.1.0
       '@1001-digital/proxies':
-        specifier: ^0.1.0
-        version: 0.1.0
+        specifier: ^0.1.1
+        version: 0.1.1
       '@noble/hashes':
         specifier: ^1.7.0
         version: 1.8.0
@@ -39,8 +39,8 @@ packages:
   '@1001-digital/natspec@0.1.0':
     resolution: {integrity: sha512-ryf+rjlmPPGoOMNktj4vrIvKmE3DNd7Un/0M9yKgtyB3oPC4vYhRoYhowX4uXep5iyBlB6zpOm73zSBsNX+PKg==}
 
-  '@1001-digital/proxies@0.1.0':
-    resolution: {integrity: sha512-y9lsswLMY7rWnMUGrKKsJu7NTKk7IGg2qCmKWXw5HkUl2ZJk+3019GAEAy1FRRt4M9KtRvUeweBcidr4Vwjuaw==}
+  '@1001-digital/proxies@0.1.1':
+    resolution: {integrity: sha512-T1GAOvFIV+ao7saTmYA4oNNWoXNemooaoBveAOq3J6rX3THsViQUo1jVNikeaD1VP0hmQj3yMFtMW1BGJFuSag==}
 
   '@babel/helper-string-parser@7.27.1':
     resolution: {integrity: sha512-qMlSxKbpRlAridDExk92nSobyDdpPijUq2DW6oDnUqd0iOGxmQjyqhMIihI9+zv4LPyZdRje2cavWPbCbWm3eA==}
@@ -1308,7 +1308,7 @@ snapshots:
 
   '@1001-digital/natspec@0.1.0': {}
 
-  '@1001-digital/proxies@0.1.0':
+  '@1001-digital/proxies@0.1.1':
     dependencies:
       '@noble/hashes': 1.8.0
 

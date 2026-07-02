@@ -1,5 +1,23 @@
 # @evmnow/sdk
 
+## 0.1.4
+
+### Patch Changes
+
+- [#8](https://github.com/evmnow/sdk/pull/8) [`af2eb8b`](https://github.com/evmnow/sdk/commit/af2eb8b374c96ccecc1335f12039f466fdb5cde2) Thanks [@yougogirldoteth](https://github.com/yougogirldoteth)! - Include verified source files for proxy targets when `include.sources` is enabled.
+
+## 0.1.3
+
+### Patch Changes
+
+- [`f2a6f75`](https://github.com/evmnow/sdk/commit/f2a6f7554d3a4d9cfd42f93181afbea6057cde58) Thanks [@jwahdatehagh](https://github.com/jwahdatehagh)! - Update proxies library
+
+## 0.1.2
+
+### Patch Changes
+
+- [`0e03e1f`](https://github.com/evmnow/sdk/commit/0e03e1fa40156807b38fafef67bc9960a5f89a36) Thanks [@yougogirldoteth](https://github.com/yougogirldoteth)! - Add structured not found errors for sourcify misses
+
 ## 0.1.1
 
 ### Patch Changes

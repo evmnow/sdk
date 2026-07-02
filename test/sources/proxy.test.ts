@@ -73,6 +73,20 @@ describe('enrichTargets (Sourcify-bound)', () => {
     expect(targets[0].abi).toHaveLength(2)
   })
 
+  it('attaches verified source files to enriched targets', async () => {
+    const src: SourcifyResult = {
+      abi: [{ type: 'function', name: 'implementationFn', inputs: [] }],
+      sources: {
+        'contracts/Implementation.sol': 'contract Implementation {}',
+      },
+    }
+    const sourcifyFetch = vi.fn(async () => src)
+
+    const { targets } = await enrichTargets([singleImplTarget], sourcifyFetch)
+
+    expect(targets[0].sources).toEqual(src.sources)
+  })
+
   it('swallows per-target sourcify errors', async () => {
     const sourcifyFetch = vi.fn(async () => { throw new Error('boom') })
     const { targets, sourcifyResults } = await enrichTargets(diamondTargets, sourcifyFetch)
