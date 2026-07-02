@@ -32,21 +32,21 @@ describe('merge', () => {
 
   it('merges record sections per-key', () => {
     const low = {
-      functions: {
-        transfer: { description: 'from natspec' },
-        approve: { description: 'from natspec' },
+      actions: {
+        transfer: { function: 'transfer', description: 'from natspec' },
+        approve: { function: 'approve', description: 'from natspec' },
       },
     }
     const high = {
-      functions: {
-        transfer: { title: 'Transfer', description: 'from repo' },
+      actions: {
+        transfer: { function: 'transfer', title: 'Transfer', description: 'from repo' },
       },
     }
 
     const result = merge(low, high)
-    expect(result.functions).toEqual({
-      transfer: { title: 'Transfer', description: 'from repo' },
-      approve: { description: 'from natspec' },
+    expect(result.actions).toEqual({
+      transfer: { function: 'transfer', title: 'Transfer', description: 'from repo' },
+      approve: { function: 'approve', description: 'from natspec' },
     })
   })
 
@@ -64,18 +64,18 @@ describe('merge', () => {
 
   it('higher priority record key fully replaces lower', () => {
     const low = {
-      functions: {
-        transfer: { description: 'old', title: 'Old Title' },
+      actions: {
+        transfer: { function: 'transfer', description: 'old', title: 'Old Title' },
       },
     }
     const high = {
-      functions: {
-        transfer: { description: 'new' },
+      actions: {
+        transfer: { function: 'transfer', description: 'new' },
       },
     }
 
     // Per-key replacement, not deep merge
-    expect(merge(low, high).functions?.transfer).toEqual({ description: 'new' })
+    expect(merge(low, high).actions?.transfer).toEqual({ function: 'transfer', description: 'new' })
   })
 
   it('array fields use highest priority', () => {
@@ -93,23 +93,23 @@ describe('merge', () => {
   it('merges three layers correctly', () => {
     const sourcify = {
       name: 'From Sourcify',
-      functions: { transfer: { description: 'natspec' } },
+      actions: { transfer: { function: 'transfer', description: 'natspec' } },
     }
     const contractUri = {
       name: 'From Contract',
       image: 'https://example.com/logo.png',
     }
     const repo = {
-      functions: {
-        transfer: { title: 'Transfer', description: 'curated' },
-        approve: { title: 'Approve' },
+      actions: {
+        transfer: { function: 'transfer', title: 'Transfer', description: 'curated' },
+        approve: { function: 'approve', title: 'Approve' },
       },
     }
 
     const result = merge(sourcify, contractUri, repo)
     expect(result.name).toBe('From Contract')
     expect(result.image).toBe('https://example.com/logo.png')
-    expect(result.functions?.transfer).toEqual({ title: 'Transfer', description: 'curated' })
-    expect(result.functions?.approve).toEqual({ title: 'Approve' })
+    expect(result.actions?.transfer).toEqual({ function: 'transfer', title: 'Transfer', description: 'curated' })
+    expect(result.actions?.approve).toEqual({ function: 'approve', title: 'Approve' })
   })
 })

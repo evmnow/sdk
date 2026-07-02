@@ -14,7 +14,7 @@ describe('fetchRepository', () => {
   const address = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2'
 
   it('fetches metadata from repository URL', async () => {
-    const metadata = { name: 'WETH', functions: { deposit: { title: 'Deposit' } } }
+    const metadata = { name: 'WETH', actions: { deposit: { function: 'deposit', title: 'Deposit' } } }
     const fetchFn = mockFetch(metadata)
 
     const result = await fetchRepository(chainId, address, fetchFn, 'https://repo.test/contracts')

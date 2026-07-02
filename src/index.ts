@@ -413,6 +413,18 @@ export type {
   MetadataSource,
 } from './errors'
 
+// Action resolution + calldata matching
+export { resolveActions, matchAction } from './actions'
+export type {
+  AbiFunction,
+  AbiParam,
+  ResolvedAction,
+  ActionResolutionIssue,
+  ActionResolutionResult,
+  ActionIssueCode,
+  DecodedCall,
+} from './actions'
+
 // Types
 export type {
   ContractMetadataDocument,
@@ -435,7 +447,8 @@ export type {
   Link,
   AuditReference,
   Group,
-  FunctionMeta,
+  ActionMeta,
+  ValueMeta,
   EventMeta,
   ErrorMeta,
   MessageMeta,
@@ -446,5 +459,5 @@ export type {
   Autofill,
   ValidationRule,
   ParamPreview,
-  FunctionExample,
+  ActionExample,
 } from './types'

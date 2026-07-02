@@ -1,7 +1,7 @@
 import type { ContractMetadataDocument } from './types'
 
 // Top-level keys that contain Record<string, object> and should merge per-key
-const RECORD_SECTIONS = ['groups', 'functions', 'events', 'errors', 'messages'] as const
+const RECORD_SECTIONS = ['groups', 'actions', 'events', 'errors', 'messages'] as const
 
 type RecordSection = typeof RECORD_SECTIONS[number]
 
@@ -9,7 +9,7 @@ type RecordSection = typeof RECORD_SECTIONS[number]
  * Merge metadata layers with increasing priority.
  * Pass layers from lowest to highest priority.
  * Scalar fields: highest non-undefined wins.
- * Record sections (functions, events, etc.): shallow merge per key.
+ * Record sections (actions, events, etc.): shallow merge per key.
  */
 export function merge(
   ...layers: (Partial<ContractMetadataDocument> | null | undefined)[]

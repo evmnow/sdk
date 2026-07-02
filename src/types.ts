@@ -22,7 +22,7 @@ export interface ContractMetadataDocument {
   audits?: AuditReference[]
   theme?: Theme
   groups?: Record<string, Group>
-  functions?: Record<string, FunctionMeta>
+  actions?: Record<string, ActionMeta>
   events?: Record<string, EventMeta>
   errors?: Record<string, ErrorMeta>
   messages?: Record<string, MessageMeta>
@@ -62,7 +62,17 @@ export interface Group {
   order: number
 }
 
-export interface FunctionMeta {
+export interface ActionMeta {
+  /**
+   * Reference to the ABI function this action invokes. Accepts a bare name
+   * (e.g. "approve"), a full Solidity signature for overloaded functions
+   * (e.g. "approve(address,uint256)"), or a 4-byte selector (e.g. "0x095ea7b3").
+   *
+   * Optional — when omitted, the action's id (its key in the `actions` object)
+   * is used as the reference. Variants whose id differs from the underlying
+   * function name (e.g. `revoke` invoking `approve`) MUST set this explicitly.
+   */
+  function?: string
   order?: number
   title?: string
   description?: string
@@ -70,13 +80,44 @@ export interface FunctionMeta {
   group?: string
   warning?: string
   featured?: boolean
+  /**
+   * Hide this action from the default UI. If every authored action
+   * referencing a function is hidden, the function itself is hidden — no
+   * synthesized default is created for it.
+   */
   hidden?: boolean
+  /** Overrides the ABI's stateMutability. Only for correcting legacy ABIs that lack the field. */
   stateMutability?: 'view' | 'pure' | 'nonpayable' | 'payable'
   params?: Record<string, ParamMeta>
+  /**
+   * Metadata for the native currency (msg.value) sent with the call.
+   * Only meaningful on payable functions.
+   */
+  value?: ValueMeta
   returns?: Record<string, ParamMeta>
-  examples?: FunctionExample[]
+  examples?: ActionExample[]
+  /** Identifiers of related actions (keys in the top-level `actions` object). */
   related?: string[]
   deprecated?: string
+  [key: `_${string}`]: unknown
+}
+
+/**
+ * Metadata for the native currency (msg.value) sent with a payable call.
+ * Always denominated in wei and rendered as the `eth` semantic type — hence
+ * no `type` field. Shares lock semantics (`hidden`/`disabled` + `autofill`)
+ * with parameters.
+ */
+export interface ValueMeta {
+  label?: string
+  description?: string
+  /** Pre-populate the value input. A constant is denominated in wei. */
+  autofill?: Autofill
+  validation?: ValidationRule
+  /** Do not render a value input; the `autofill` value is attached at call time. REQUIRES `autofill`. */
+  hidden?: boolean
+  /** Render the value input non-editable (e.g. a fixed mint price). REQUIRES `autofill`. Mutually exclusive with `hidden`. */
+  disabled?: boolean
   [key: `_${string}`]: unknown
 }
 
@@ -113,6 +154,21 @@ export interface ParamMeta {
   autofill?: Autofill
   validation?: ValidationRule
   preview?: ParamPreview
+  /**
+   * When true, do not render an input for this parameter. The `autofill`
+   * value is injected at call time. REQUIRES `autofill`.
+   *
+   * Note: this is the input-side hidden flag — orthogonal to the display-side
+   * `type: "hidden"` semantic type, which controls whether a value is rendered
+   * in read contexts.
+   */
+  hidden?: boolean
+  /**
+   * When true, render the input but make it non-editable. Displays the
+   * autofilled value for transparency. REQUIRES `autofill`. Mutually
+   * exclusive with `hidden: true`.
+   */
+  disabled?: boolean
   [key: `_${string}`]: unknown
 }
 
@@ -184,7 +240,7 @@ export interface ParamPreview {
   image?: string
 }
 
-export interface FunctionExample {
+export interface ActionExample {
   label: string
   params: Record<string, string>
 }
@@ -295,7 +351,7 @@ export interface SourcifyResult {
   devdoc?: Record<string, unknown>
   sources?: Record<string, string>
   deployedBytecode?: string
-  functions?: Record<string, FunctionMeta>
+  actions?: Record<string, ActionMeta>
   events?: Record<string, EventMeta>
   errors?: Record<string, ErrorMeta>
 }

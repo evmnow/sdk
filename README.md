@@ -22,7 +22,7 @@ const result = await client.get('0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984')
 
 console.log(result.metadata.name)        // "Uniswap"
 console.log(result.metadata.description) // ...
-console.log(result.metadata.functions)   // { "delegate(address)": { title: "...", ... }, ... }
+console.log(result.metadata.actions)     // { "delegate": { function: "delegate(address)", title: "...", ... }, ... }
 console.log(result.abi)                  // full ABI from Sourcify (composite for diamonds)
 ```
 
@@ -43,7 +43,7 @@ The SDK fetches metadata from four sources in parallel, then merges them with in
 | Medium | **contractURI** | On-chain ERC-7572 fields: name, symbol, description, image, links |
 | Highest | **Repository** | Curated JSON from the [evmnow/contract-metadata](https://github.com/evmnow/contract-metadata) repo — full control over every field |
 
-Higher-priority sources override lower ones. Record sections (`functions`, `events`, `errors`, `messages`, `groups`) are shallow-merged per key, so a repository entry can add a `title` to a function while keeping the NatSpec `description` from Sourcify.
+Higher-priority sources override lower ones. Record sections (`actions`, `events`, `errors`, `messages`, `groups`) are shallow-merged per key, so a repository entry can add a `title` to an action while keeping the NatSpec `description` from Sourcify.
 
 ## Configuration
 
@@ -154,7 +154,7 @@ interface ProxyResolution {
   targets: TargetInfo[]       // ERC-2535 facets or proxy implementations, plus ABI / NatSpec when Sourcify is enabled
   compositeAbi?: unknown[]    // deduped ABI across every target
   natspec?: NatSpec           // merged userdoc/devdoc across targets
-  metadataLayer?: Partial<ContractMetadataDocument>  // functions/events/errors ready to merge
+  metadataLayer?: Partial<ContractMetadataDocument>  // actions/events/errors ready to merge
 }
 ```
 
@@ -202,7 +202,7 @@ interface ContractMetadataDocument {
   audits?: AuditReference[]
   theme?: Theme
   groups?: Record<string, Group>
-  functions?: Record<string, FunctionMeta>
+  actions?: Record<string, ActionMeta>
   events?: Record<string, EventMeta>
   errors?: Record<string, ErrorMeta>
   messages?: Record<string, MessageMeta>
@@ -210,7 +210,12 @@ interface ContractMetadataDocument {
 }
 ```
 
-Function metadata includes fields like `title`, `description`, `intent`, `warning`, `params` (with types, labels, validation, autofill), `examples`, and more. See `src/types.ts` for the full type definitions.
+Actions are keyed by a free-form identifier and reference the ABI function they invoke via an optional `function` field (bare name, full signature, or 4-byte selector; when omitted, the action's id is used as the reference). Each action may carry `title`, `description`, `intent`, `warning`, `params` (with types, labels, validation, autofill, `hidden`, `disabled`), a `value` object describing the native currency sent with a payable call, `examples`, and more. Multiple actions may target the same ABI function as variants (`approve`, `approve-max`, `revoke`). See `src/types.ts` for full type definitions.
+
+Two pure helpers turn the document into UI-ready data:
+
+- `resolveActions(abi, doc)` — returns a ready-to-render list of `ResolvedAction` entries: every authored action resolved to its ABI function, plus a synthesized default for each ABI function no authored action references. Non-fatal authoring problems (unresolved refs, locked params without autofill, `value` on non-payable functions) are reported as `issues`.
+- `matchAction(actions, call)` — resolves a decoded transaction to the most specific action for confirmation previews and history views. Locked parameters (hidden/disabled with a resolvable autofill) act as equality constraints against the decoded arguments; the surviving candidate with the most locked parameters wins, with deterministic tie-breaks (lowest `order`, then smallest id). Decode calldata with your own ABI tooling — the SDK matches on decoded values.
 
 ## Includes (interfaces)
 
@@ -235,7 +240,7 @@ The same pipeline also handles common single-implementation proxy patterns. For 
 - `result.abi` — composite ABI across the main contract + every target (first-occurrence wins, deduped by selector for functions and by signature for events/errors)
 - `result.natspec` — `userdoc` / `devdoc` merged across the main contract and targets, main doc taking priority
 - `result.sources` — main contract source files plus target source files when `include.sources` is enabled; for an unverified proxy with one verified implementation, this is the implementation source map
-- `result.metadata.functions` / `events` / `errors` — NatSpec-derived sections from every target layered in at lowest priority, so curated repo/contractURI/main-Sourcify fields still win
+- `result.metadata.actions` / `events` / `errors` — NatSpec-derived sections from every target layered in at lowest priority, so curated repo/contractURI/main-Sourcify fields still win
 
 Targets are fetched directly from Sourcify (not recursively through `client.get`), which guards against facets or implementations that themselves look like proxies. Setting `sources.sourcify: false` skips per-target Sourcify traffic as well — the target list still contains addresses and selectors, but ABI, NatSpec, and sources are omitted.
 
