@@ -1,5 +1,13 @@
 # @evmnow/sdk
 
+## 0.3.0
+
+### Minor Changes
+
+- [`3e23f05`](https://github.com/evmnow/sdk/commit/3e23f0570a8938aead304fb55e8059b8cad19e98) Thanks [@jwahdatehagh](https://github.com/jwahdatehagh)! - Support positional `_N` parameter keys in action metadata: `matchAction` resolves
+  constraints by ABI position (name keys win), and locked keys that match no ABI
+  parameter fail the variant. Adds `paramMetaAt` and `actionRequiresSender` exports.
+
 ## 0.2.0
 
 ### Minor Changes
