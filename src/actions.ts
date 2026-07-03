@@ -280,6 +280,41 @@ function lockFlagIssues(
   return issues
 }
 
+// ── Parameter keys ──
+
+const POSITIONAL_KEY_RE = /^_(\d+)$/
+
+/**
+ * Metadata entry for the ABI parameter at `index`. The name key wins over the
+ * positional `_N` key (zero-based), which keeps interface metadata portable
+ * across implementations that name the same parameter differently.
+ */
+export function paramMetaAt<T>(
+  params: Record<string, T> | undefined,
+  param: { name?: string } | undefined,
+  index: number,
+): T | undefined {
+  if (!params) return undefined
+  const name = param?.name
+  if (name && params[name] !== undefined) return params[name]
+  return params[`_${index}`]
+}
+
+/**
+ * True when a locked (hidden/disabled) parameter or `value` autofills from
+ * `connected-address` — the action is unusable without a connected wallet.
+ */
+export function actionRequiresSender(meta: ActionMeta): boolean {
+  const locked = (p?: {
+    autofill?: unknown
+    hidden?: boolean
+    disabled?: boolean
+  }) =>
+    Boolean(p && (p.hidden || p.disabled) && p.autofill === 'connected-address')
+
+  return Object.values(meta.params ?? {}).some(locked) || locked(meta.value)
+}
+
 // ── Calldata → action matching ──
 
 /**
@@ -347,6 +382,21 @@ interface Candidate {
   failed: boolean
 }
 
+// Decoded argument for the ABI parameter at `index` — by name, then `_N`,
+// then bare index (some decoders key unnamed params that way).
+function decodedArgAt(
+  call: DecodedCall,
+  param: AbiParam | undefined,
+  index: number,
+): unknown {
+  const args = call.args
+  if (!args) return undefined
+  const name = param?.name
+  if (name && name in args) return args[name]
+  if (`_${index}` in args) return args[`_${index}`]
+  return args[String(index)]
+}
+
 function evaluateCandidate(action: ResolvedAction, call: DecodedCall): Candidate {
   const candidate: Candidate = { action, locked: 0, failed: false }
 
@@ -367,11 +417,27 @@ function evaluateCandidate(action: ResolvedAction, call: DecodedCall): Candidate
     candidate.locked++
   }
 
-  for (const [name, p] of Object.entries(action.meta.params ?? {})) {
+  // Walk ABI inputs by position so `_N` keys constrain the right argument.
+  const inputs = action.abi.inputs ?? []
+  for (const [i, input] of inputs.entries()) {
+    const p = paramMetaAt(action.meta.params, input, i)
     if (!p) continue
-    applyConstraint(p, call.args?.[name])
+    applyConstraint(p, decodedArgAt(call, input, i))
     if (candidate.failed) return candidate
   }
+
+  // Locked keys that resolve to no ABI parameter can never be confirmed.
+  const resolvable = new Set<string>()
+  inputs.forEach((input, i) => {
+    if (input.name) resolvable.add(input.name)
+    resolvable.add(`_${i}`)
+  })
+  for (const [key, p] of Object.entries(action.meta.params ?? {})) {
+    if (!p || resolvable.has(key)) continue
+    applyConstraint(p, undefined)
+    if (candidate.failed) return candidate
+  }
+
   if (action.meta.value) {
     applyConstraint(action.meta.value, call.value)
   }

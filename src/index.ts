@@ -414,7 +414,12 @@ export type {
 } from './errors'
 
 // Action resolution + calldata matching
-export { resolveActions, matchAction } from './actions'
+export {
+  resolveActions,
+  matchAction,
+  paramMetaAt,
+  actionRequiresSender,
+} from './actions'
 export type {
   AbiFunction,
   AbiParam,

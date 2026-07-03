@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { resolveActions, matchAction } from '../src/actions'
+import {
+  resolveActions,
+  matchAction,
+  paramMetaAt,
+  actionRequiresSender,
+} from '../src/actions'
 import type { ContractMetadataDocument } from '../src/types'
 
 const APPROVE_ABI = {
@@ -619,5 +624,156 @@ describe('matchAction', () => {
     })
     // order 1 beats order 2; "b-approve" < "c-approve"
     expect(match?.id).toBe('b-approve')
+  })
+})
+
+describe('positional parameter keys', () => {
+  // WETH's approve(guy, wad) — interface metadata must reference params positionally.
+  const WETH_APPROVE_ABI = {
+    type: 'function',
+    name: 'approve',
+    inputs: [
+      { name: 'guy', type: 'address' },
+      { name: 'wad', type: 'uint256' },
+    ],
+    outputs: [{ type: 'bool' }],
+    stateMutability: 'nonpayable',
+  }
+
+  const SPENDER = '0x1111111111111111111111111111111111111111'
+
+  const DOC: Partial<ContractMetadataDocument> = {
+    actions: {
+      approve: { title: 'Approve' },
+      revoke: {
+        function: 'approve',
+        title: 'Revoke Approval',
+        params: {
+          _1: { autofill: { type: 'constant', value: '0' }, hidden: true },
+        },
+      },
+    },
+  }
+
+  it('matches locked positional constraints against differently-named ABI params', () => {
+    const { actions } = resolveActions([WETH_APPROVE_ABI], DOC)
+    const revoke = matchAction(actions, {
+      selector: APPROVE_SELECTOR,
+      args: { guy: SPENDER, wad: 0n },
+    })
+    expect(revoke?.id).toBe('revoke')
+
+    const base = matchAction(actions, {
+      selector: APPROVE_SELECTOR,
+      args: { guy: SPENDER, wad: 7n },
+    })
+    expect(base?.id).toBe('approve')
+  })
+
+  it('name keys win over positional keys for the same parameter', () => {
+    const doc: Partial<ContractMetadataDocument> = {
+      actions: {
+        approve: { title: 'Approve' },
+        revoke: {
+          function: 'approve',
+          params: {
+            wad: { autofill: { type: 'constant', value: '0' }, hidden: true },
+            _1: { autofill: { type: 'constant', value: '1' }, hidden: true },
+          },
+        },
+      },
+    }
+    const { actions } = resolveActions([WETH_APPROVE_ABI], doc)
+    // The shadowed positional constraint (wad = 1) must not apply.
+    const match = matchAction(actions, {
+      selector: APPROVE_SELECTOR,
+      args: { guy: SPENDER, wad: 0n },
+    })
+    expect(match?.id).toBe('revoke')
+  })
+
+  it('fails a variant whose locked key resolves to no ABI parameter', () => {
+    const doc: Partial<ContractMetadataDocument> = {
+      actions: {
+        approve: { title: 'Approve' },
+        broken: {
+          function: 'approve',
+          params: {
+            _5: { autofill: { type: 'constant', value: '0' }, hidden: true },
+          },
+        },
+      },
+    }
+    const { actions } = resolveActions([WETH_APPROVE_ABI], doc)
+    const match = matchAction(actions, {
+      selector: APPROVE_SELECTOR,
+      args: { guy: SPENDER, wad: 0n },
+    })
+    expect(match?.id).toBe('approve')
+  })
+})
+
+describe('paramMetaAt', () => {
+  const params = {
+    spender: { label: 'spender by name' },
+    _0: { label: 'first positionally' },
+    _1: { label: 'second positionally' },
+  }
+
+  it('prefers the name key over the positional key', () => {
+    const meta = paramMetaAt(params, { name: 'spender' }, 0)
+    expect(meta?.label).toBe('spender by name')
+  })
+
+  it('falls back to the positional key when the name has no entry', () => {
+    const meta = paramMetaAt(params, { name: 'wad' }, 1)
+    expect(meta?.label).toBe('second positionally')
+  })
+
+  it('resolves positionally for unnamed parameters', () => {
+    const meta = paramMetaAt(params, {}, 1)
+    expect(meta?.label).toBe('second positionally')
+  })
+
+  it('returns undefined without params or matching keys', () => {
+    expect(paramMetaAt(undefined, { name: 'a' }, 0)).toBeUndefined()
+    expect(paramMetaAt(params, { name: 'other' }, 9)).toBeUndefined()
+  })
+})
+
+describe('actionRequiresSender', () => {
+  it('is true when a hidden param autofills from connected-address', () => {
+    expect(
+      actionRequiresSender({
+        params: { _0: { autofill: 'connected-address', hidden: true } },
+      }),
+    ).toBe(true)
+  })
+
+  it('is true when a disabled value autofills from connected-address', () => {
+    expect(
+      actionRequiresSender({
+        value: { autofill: 'connected-address', disabled: true },
+      }),
+    ).toBe(true)
+  })
+
+  it('is false when connected-address only prefills a visible input', () => {
+    expect(
+      actionRequiresSender({
+        params: { from: { autofill: 'connected-address' } },
+      }),
+    ).toBe(false)
+  })
+
+  it('is false for constant-locked params and empty metadata', () => {
+    expect(
+      actionRequiresSender({
+        params: {
+          _1: { autofill: { type: 'constant', value: '0' }, hidden: true },
+        },
+      }),
+    ).toBe(false)
+    expect(actionRequiresSender({})).toBe(false)
   })
 })
