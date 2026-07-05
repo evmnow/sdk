@@ -1,5 +1,13 @@
 # @evmnow/sdk
 
+## 0.5.0
+
+### Minor Changes
+
+- [`17d370f`](https://github.com/evmnow/sdk/commit/17d370f74d6bc10f9ec5323413c32590014b8185) Thanks [@jwahdatehagh](https://github.com/jwahdatehagh)! - Detect ERC-20/ERC-721 standards from the final ABI (after proxy composition) and apply the bundled interface metadata layer at the lowest merge priority — labeled actions, groups, and semantic types like `token-amount` for any standard token, no curated document required. When no metadata layer provides `name`/`symbol`, they are read from the contract on-chain. Detection is reported in `result.interfaces` and can be disabled via `sources.interfaces`.
+
+- [`b56b774`](https://github.com/evmnow/sdk/commit/b56b774377b335efc5689ebf3fca1667d20976d7) Thanks [@jwahdatehagh](https://github.com/jwahdatehagh)! - Align amount rendering with the standard's token-resolution rules. `resolveAmountDisplay`/`formatAmount` no longer guess 18 decimals for an unresolved `token-amount` — they return `null` so callers render the raw value (per the spec, consumers MUST NOT substitute default decimals). `formatAmount` renders 2^256-1 as "Unlimited" (configurable via the `unlimited` option; `MAX_UINT256` is exported). New token-resolution helpers implement the spec's resolution order — `tokenAddressOf`, `tokenParamOf`, and `resolveTokenAddress` (explicit `tokenAddress` → `tokenParam` sibling-argument reference → described contract for bare forms) — and `TokenAmountType` gains the new optional `tokenParam` field. Two new subpath exports: `@evmnow/sdk/token` (`createTokenInfoResolver` reads `decimals()`/`symbol()` over JSON-RPC with caching, in-flight dedup, bytes32-symbol support, and hostile-symbol sanitization) and `@evmnow/sdk/intent` (`renderIntent` renders `{param}` intent templates with type-formatted values, including `{value}`, `#` prefixes, and token-amount resolution). The bundled ERC-20 interface types the Permit message `value` field as `token-amount`.
+
 ## 0.4.0
 
 ### Minor Changes
