@@ -7,6 +7,10 @@ import {
   parseUnits,
   formatAmount,
   parseAmount,
+  tokenAddressOf,
+  tokenParamOf,
+  resolveTokenAddress,
+  MAX_UINT256,
 } from '../src/format'
 
 describe('amountKind / isAmountType', () => {
@@ -50,9 +54,8 @@ describe('resolveAmountDisplay', () => {
     })
   })
 
-  it('resolves token-amount from token info, falling back to 18 when unresolved', () => {
+  it('resolves token-amount from token info', () => {
     const t = { type: 'token-amount', tokenAddress: '0xabc' } as const
-    expect(resolveAmountDisplay(t)).toEqual({ decimals: 18 })
     expect(resolveAmountDisplay(t, { decimals: 6, symbol: 'USDC' })).toEqual({
       decimals: 6,
       symbol: 'USDC',
@@ -61,6 +64,12 @@ describe('resolveAmountDisplay', () => {
       decimals: 6,
       symbol: 'USDC',
     })
+  })
+
+  it('returns null for token-amount without token info — no decimals guessing', () => {
+    const t = { type: 'token-amount', tokenAddress: '0xabc' } as const
+    expect(resolveAmountDisplay(t)).toBeNull()
+    expect(resolveAmountDisplay('token-amount')).toBeNull()
   })
 
   it('returns null for non-amount types', () => {
@@ -160,6 +169,77 @@ describe('formatAmount', () => {
   it('returns null for non-amount types', () => {
     expect(formatAmount(1n, 'address')).toBeNull()
     expect(formatAmount(1n, undefined)).toBeNull()
+  })
+
+  it('returns null for token-amount without token info', () => {
+    expect(formatAmount(1000000n, 'token-amount')).toBeNull()
+    expect(formatAmount(1000000n, { type: 'token-amount', tokenAddress: '0xabc' })).toBeNull()
+  })
+
+  it('renders max-uint256 as Unlimited', () => {
+    expect(formatAmount(MAX_UINT256, 'eth')).toBe('Unlimited ETH')
+    expect(
+      formatAmount(MAX_UINT256, 'token-amount', { tokenInfo: { decimals: 6, symbol: 'USDC' } }),
+    ).toBe('Unlimited USDC')
+    expect(formatAmount(MAX_UINT256, { type: 'amount', decimals: 6 })).toBe('Unlimited')
+    expect(formatAmount(MAX_UINT256, 'eth', { unlimited: 'No limit' })).toBe('No limit ETH')
+    expect(formatAmount(MAX_UINT256, 'eth', { symbol: false })).toBe('Unlimited')
+  })
+
+  it('formats max-uint256 as a number when unlimited is disabled', () => {
+    const out = formatAmount(MAX_UINT256, { type: 'amount', decimals: 0 }, { unlimited: false, group: false })
+    expect(out).toBe(MAX_UINT256.toString())
+  })
+})
+
+describe('token resolution helpers', () => {
+  const usdc = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'
+
+  it('tokenAddressOf returns explicit addresses (lowercased) for token types only', () => {
+    expect(tokenAddressOf({ type: 'token-amount', tokenAddress: '0xABC'.padEnd(42, '0') })).toBe(
+      '0xabc'.padEnd(42, '0').toLowerCase(),
+    )
+    expect(tokenAddressOf({ type: 'token-id', tokenAddress: usdc })).toBe(usdc)
+    expect(tokenAddressOf('token-amount')).toBeUndefined()
+    expect(tokenAddressOf({ type: 'amount' })).toBeUndefined()
+  })
+
+  it('tokenParamOf returns the tokenParam reference', () => {
+    expect(tokenParamOf({ type: 'token-amount', tokenParam: 'tokenContract' })).toBe('tokenContract')
+    expect(tokenParamOf({ type: 'token-amount', tokenAddress: usdc })).toBeUndefined()
+    expect(tokenParamOf('token-amount')).toBeUndefined()
+  })
+
+  it('resolveTokenAddress prefers explicit tokenAddress', () => {
+    expect(
+      resolveTokenAddress({ type: 'token-amount', tokenAddress: usdc }, { contractAddress: '0x1' }),
+    ).toBe(usdc)
+  })
+
+  it('resolveTokenAddress reads tokenParam from the argument lookup', () => {
+    const type = { type: 'token-amount', tokenParam: 'tokenContract' } as const
+    const args: Record<string, unknown> = {
+      tokenContract: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+    }
+    expect(resolveTokenAddress(type, { getArg: (k) => args[k] })).toBe(usdc)
+  })
+
+  it('resolveTokenAddress returns undefined for missing or non-address tokenParam values', () => {
+    const type = { type: 'token-amount', tokenParam: 'tokenContract' } as const
+    expect(resolveTokenAddress(type, { getArg: () => undefined })).toBeUndefined()
+    expect(resolveTokenAddress(type, { getArg: () => 42n })).toBeUndefined()
+    expect(resolveTokenAddress(type, {})).toBeUndefined()
+  })
+
+  it('resolveTokenAddress defaults bare forms to the described contract', () => {
+    expect(resolveTokenAddress('token-amount', { contractAddress: usdc.toUpperCase().replace('0X', '0x') })).toBe(usdc)
+    expect(resolveTokenAddress('token-id', { contractAddress: usdc })).toBe(usdc)
+    expect(resolveTokenAddress('token-amount', {})).toBeUndefined()
+  })
+
+  it('resolveTokenAddress returns undefined for non-token types', () => {
+    expect(resolveTokenAddress('eth', { contractAddress: usdc })).toBeUndefined()
+    expect(resolveTokenAddress({ type: 'amount' }, { contractAddress: usdc })).toBeUndefined()
   })
 })
 

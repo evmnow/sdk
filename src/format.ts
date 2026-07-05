@@ -52,9 +52,10 @@ export function isAmountType(type: ParamType | undefined | null): boolean {
 /**
  * Resolve the `{ decimals, symbol }` an amount-like type renders with.
  *
- * For `token-amount`, pass the resolved on-chain `tokenInfo`. When it is not yet
- * available the type still resolves — to a neutral 18-decimals fallback with no
- * symbol — so callers can render (imperfectly) before the lookup completes.
+ * For `token-amount`, pass the resolved on-chain `tokenInfo`. When it is not
+ * available this returns `null`: per the standard, consumers MUST NOT substitute
+ * default decimals for an unresolved token — guessing displays a wrong number.
+ * Render the raw base-unit value instead and indicate the token is unresolved.
  *
  * Returns `null` for non-amount types.
  */
@@ -73,7 +74,7 @@ export function resolveAmountDisplay(
     case 'token-amount':
       return tokenInfo
         ? { decimals: tokenInfo.decimals, symbol: tokenInfo.symbol }
-        : { decimals: 18 }
+        : null
     case 'amount': {
       // `amount` is only ever an object form; narrow past the string branch.
       const obj = type as { type: 'amount'; decimals?: number; symbol?: string }
@@ -185,6 +186,9 @@ function groupInteger(intPart: string): string {
 
 // ── Display formatting ──
 
+/** 2^256-1 — the conventional "no limit" sentinel for amount-like values. */
+export const MAX_UINT256 = (1n << 256n) - 1n
+
 export interface FormatAmountOptions {
   /** Resolved token identity, required to format `token-amount` with real decimals/symbol. */
   tokenInfo?: TokenInfo
@@ -194,6 +198,12 @@ export interface FormatAmountOptions {
   symbol?: boolean
   /** Group the integer part with thousands separators. Default: true. */
   group?: boolean
+  /**
+   * Label rendered for a value of 2^256-1 (unlimited approvals), per the
+   * standard's SHOULD. Pass `false` to format the sentinel as a number instead.
+   * Default: "Unlimited".
+   */
+  unlimited?: string | false
 }
 
 /**
@@ -219,8 +229,14 @@ export function formatAmount(
   const display = resolveAmountDisplay(type, options.tokenInfo)
   if (!display) return null
 
-  const { symbol = true, group = true, maxDecimals } = options
-  let text = toDecimalString(toBigInt(raw), display.decimals, maxDecimals)
+  const { symbol = true, group = true, maxDecimals, unlimited = 'Unlimited' } = options
+  const value = toBigInt(raw)
+
+  if (unlimited !== false && value === MAX_UINT256) {
+    return symbol && display.symbol ? `${unlimited} ${display.symbol}` : unlimited
+  }
+
+  let text = toDecimalString(value, display.decimals, maxDecimals)
 
   if (group) {
     const [intPart, fracPart] = text.split('.')
@@ -243,7 +259,69 @@ export function parseAmount(
 ): bigint {
   const display = resolveAmountDisplay(type, tokenInfo)
   if (!display) {
-    throw new Error('parseAmount: type is not an amount-like semantic type')
+    throw new Error(
+      'parseAmount: type is not amount-like, or the token identity is unresolved (pass tokenInfo for token-amount)',
+    )
   }
   return parseUnits(value, display.decimals)
+}
+
+// ── Token resolution ──
+
+/** Context for resolving which token a `token-amount` or `token-id` type refers to. */
+export interface TokenResolutionContext {
+  /** The contract the metadata document describes — the default for bare forms. */
+  contractAddress?: string
+  /**
+   * Look up a decoded argument by the key written in the metadata (ABI name or
+   * `_N` positional key) — needed to resolve `tokenParam` references.
+   */
+  getArg?: (key: string) => unknown
+}
+
+/** The explicit `tokenAddress` of a `token-amount` / `token-id` object type, if any. */
+export function tokenAddressOf(type: ParamType | undefined | null): string | undefined {
+  if (type && typeof type === 'object' && (type.type === 'token-amount' || type.type === 'token-id')) {
+    return type.tokenAddress?.toLowerCase()
+  }
+  return undefined
+}
+
+/** The `tokenParam` reference of a `token-amount` object type, if any. */
+export function tokenParamOf(type: ParamType | undefined | null): string | undefined {
+  if (type && typeof type === 'object' && type.type === 'token-amount') {
+    return type.tokenParam
+  }
+  return undefined
+}
+
+/**
+ * Resolve the token contract a `token-amount` or `token-id` type refers to,
+ * per the standard's resolution order: explicit `tokenAddress` → the value of
+ * the `tokenParam` argument → the described contract (bare form).
+ *
+ * Returns the address lowercased, or `undefined` when the type is not
+ * token-denominated or a `tokenParam` argument is missing / not an address.
+ */
+export function resolveTokenAddress(
+  type: ParamType | undefined | null,
+  context: TokenResolutionContext = {},
+): string | undefined {
+  if (!type) return undefined
+
+  const name = typeof type === 'string' ? type : type.type
+  if (name !== 'token-amount' && name !== 'token-id') return undefined
+
+  const explicit = tokenAddressOf(type)
+  if (explicit) return explicit
+
+  const param = tokenParamOf(type)
+  if (param) {
+    const arg = context.getArg?.(param)
+    return typeof arg === 'string' && /^0x[0-9a-fA-F]{40}$/.test(arg)
+      ? arg.toLowerCase()
+      : undefined
+  }
+
+  return context.contractAddress?.toLowerCase()
 }

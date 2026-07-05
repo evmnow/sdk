@@ -190,9 +190,17 @@ export interface AddressType {
   addressBook?: boolean
 }
 
+/**
+ * Token amount for a specific token. Identify the token with a fixed
+ * `tokenAddress`, or with `tokenParam` — the name (or `_N` positional key) of an
+ * address parameter in the same action/event/message whose value is the token.
+ * The two are mutually exclusive. With neither, use the bare `'token-amount'`
+ * string form instead: the token is the contract the document describes.
+ */
 export interface TokenAmountType {
   type: 'token-amount'
-  tokenAddress: string
+  tokenAddress?: string
+  tokenParam?: string
 }
 
 /**

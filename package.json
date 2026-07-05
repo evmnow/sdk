@@ -18,6 +18,14 @@
       "types": "./dist/format.d.ts",
       "import": "./dist/format.js"
     },
+    "./token": {
+      "types": "./dist/token.d.ts",
+      "import": "./dist/token.js"
+    },
+    "./intent": {
+      "types": "./dist/intent.d.ts",
+      "import": "./dist/intent.js"
+    },
     "./uri": {
       "types": "./dist/uri.d.ts",
       "import": "./dist/uri.js"

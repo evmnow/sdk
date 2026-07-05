@@ -382,13 +382,26 @@ export {
   parseUnits,
   formatAmount,
   parseAmount,
+  tokenAddressOf,
+  tokenParamOf,
+  resolveTokenAddress,
+  MAX_UINT256,
 } from './format'
 export type {
   AmountKind,
   TokenInfo,
   AmountDisplay,
   FormatAmountOptions,
+  TokenResolutionContext,
 } from './format'
+
+// Token identity resolution (on-chain decimals()/symbol() with caching)
+export { createTokenInfoResolver } from './token'
+export type { TokenInfoResolver, TokenInfoResolverConfig } from './token'
+
+// Intent template rendering
+export { renderIntent } from './intent'
+export type { IntentContext, IntentMeta } from './intent'
 
 // Proxy utilities
 export {

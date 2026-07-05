@@ -270,7 +270,8 @@ export const erc20Interface: Partial<ContractMetadataDocument> = {
         },
         "value": {
           "label": "amount",
-          "description": "Maximum amount the spender can transfer"
+          "description": "Maximum amount the spender can transfer",
+          "type": "token-amount"
         },
         "nonce": {
           "label": "nonce",
