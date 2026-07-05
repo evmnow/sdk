@@ -403,6 +403,14 @@ export type { TokenInfoResolver, TokenInfoResolverConfig } from './token'
 export { renderIntent } from './intent'
 export type { IntentContext, IntentMeta } from './intent'
 
+// Document semantic validation (cross-references, input flags, ambiguity)
+export { semanticChecks, isValidFunctionRef } from './validate'
+export type {
+  SemanticIssue,
+  SemanticCheckOptions,
+  ValidatableDocument,
+} from './validate'
+
 // Proxy utilities
 export {
   fetchProxy,

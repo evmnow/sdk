@@ -26,6 +26,10 @@
       "types": "./dist/intent.d.ts",
       "import": "./dist/intent.js"
     },
+    "./validate": {
+      "types": "./dist/validate.d.ts",
+      "import": "./dist/validate.js"
+    },
     "./uri": {
       "types": "./dist/uri.d.ts",
       "import": "./dist/uri.js"
