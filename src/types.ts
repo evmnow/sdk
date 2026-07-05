@@ -318,7 +318,7 @@ export interface ProxyResolution {
   targets: TargetInfo[]
   /** EIP-1967 beacon address (only for `eip-1967-beacon`). */
   beacon?: string
-  /** EIP-1967 admin address (only for `eip-1967` when the admin slot is set). */
+  /** Proxy admin address (for `eip-1967` / `zeppelinos` when the admin slot is set). */
   admin?: string
   /** Composite ABI built from target ABIs (first-wins dedup by selector). */
   compositeAbi?: unknown[]

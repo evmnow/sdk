@@ -29,13 +29,13 @@ Contract Metadata SDK (`@evmnow/sdk`) — resolve complete contract metadata fro
 - Vite build with `preserveModules: true` mirrors `src/` → `dist/` 1:1 — each module is an independently importable subpath under `@evmnow/sdk/...` (declared in `package.json#exports`)
 - `sideEffects: false` in package.json — enables aggressive tree-shaking
 - Factory pattern — `createContractClient(config)` returns a `ContractClient` with `get`, `fetchRepository`, `fetchContractURI`, `fetchSourcify`, `fetchProxy`
-- Pure/standalone exports — `merge`, `resolveIncludes`, `decodeFacets`, `computeSelector`, `canonicalSignature`, `filterAbiBySelectors`, `buildCompositeAbi`, `mergeNatspecDocs`, `enrichTargets`, `composeProxyResolution`, per-pattern detectors (`detectDiamond`, `detectEip1967`, `detectEip1967Beacon`, `detectEip1822`, `detectEip1167`, `detectGnosisSafe`, `detectEip897`), `detectProxy` orchestrator, and each source's `fetchX` are all usable without the client
+- Pure/standalone exports — `merge`, `resolveIncludes`, `decodeFacets`, `computeSelector`, `canonicalSignature`, `filterAbiBySelectors`, `buildCompositeAbi`, `mergeNatspecDocs`, `enrichTargets`, `composeProxyResolution`, per-pattern detectors (`detectDiamond`, `detectEip1967`, `detectEip1967Beacon`, `detectEip1822`, `detectZeppelinOs`, `detectEip1167`, `detectGnosisSafe`, `detectEip897`), `detectProxy` orchestrator, and each source's `fetchX` are all usable without the client
 - Minimal runtime dependencies — `@1001-digital/proxies` (proxy detection + ABI/NatSpec utilities) + `@1001-digital/natspec` (parse only)
 - Uses natspec as a parsing library only (pure `parse` + `toMetadata` functions, not its fetch client)
 
 ## Proxy pipeline
 
-- `detectProxy` — tries patterns in priority order (`eip-2535-diamond → eip-1967 → eip-1967-beacon → eip-1822 → eip-1167 → gnosis-safe → eip-897`); returns `RawProxy | null`. Single-hop only.
+- `detectProxy` — tries patterns in priority order (`eip-2535-diamond → eip-1967 → eip-1967-beacon → eip-1822 → zeppelinos → eip-1167 → gnosis-safe → eip-897`); returns `RawProxy | null`. Single-hop only.
 - `enrichTargets(targets, sourcifyFetch)` — dependency-injected fetcher (pass `null` to skip Sourcify). Returns `TargetInfo[]` plus raw `SourcifyResult[]` so callers can build their own derived layers. ABI is filtered by selectors for diamond facets; passed through untouched for single-impl proxies.
 - `composeProxyResolution` — pure; builds `compositeAbi`, `metadataLayer`, and merged `natspec` from enriched targets + their sourcify results.
 - `fetchProxy` — high-level: detect → enrich → compose in one call.

@@ -22,6 +22,7 @@ export {
   detectEip1967,
   detectEip1967Beacon,
   detectEip1822,
+  detectZeppelinOs,
   detectEip1167,
   detectGnosisSafe,
   detectEip897,
@@ -38,6 +39,8 @@ export {
   EIP1967_BEACON_SLOT,
   EIP1967_ADMIN_SLOT,
   EIP1822_PROXIABLE_SLOT,
+  ZEPPELINOS_IMPL_SLOT,
+  ZEPPELINOS_ADMIN_SLOT,
 } from '@1001-digital/proxies'
 export type { ProxyPattern, RawProxy, ResolvedTarget } from '@1001-digital/proxies'
 
