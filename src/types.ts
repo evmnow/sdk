@@ -252,6 +252,11 @@ export interface SourceConfig {
   contractURI?: boolean
   sourcify?: boolean
   proxy?: boolean
+  /**
+   * Detect token standards (ERC-20/ERC-721) from the final ABI and apply the
+   * bundled interface metadata layer at the lowest priority. Default: true.
+   */
+  interfaces?: boolean
 }
 
 export interface IncludeFields {
@@ -283,6 +288,9 @@ export interface GetOptions {
 
 // ── Result ──
 
+/** A token standard detectable from the ABI alone. */
+export type StandardInterface = 'erc20' | 'erc721'
+
 export interface ContractResult {
   chainId: number
   address: string
@@ -292,6 +300,8 @@ export interface ContractResult {
   sources?: Record<string, string>
   deployedBytecode?: string
   proxy?: ProxyResolution
+  /** Token standards detected from the final ABI (after proxy composition). */
+  interfaces?: StandardInterface[]
 }
 
 export interface NatSpec {

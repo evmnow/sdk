@@ -38,12 +38,15 @@ The SDK fetches metadata from four sources in parallel, then merges them with in
 
 | Priority | Source | What it provides |
 |----------|--------|-----------------|
-| Lowest | **Diamonds and proxy targets** | ERC-2535 facet and proxy implementation ABI + NatSpec, merged into a composite ABI and `result.proxy` |
+| Lowest | **Standard interfaces** | Bundled ERC-20/ERC-721 metadata layer, applied when the final ABI matches the standard |
+| Low | **Diamonds and proxy targets** | ERC-2535 facet and proxy implementation ABI + NatSpec, merged into a composite ABI and `result.proxy` |
 | Low | **Sourcify** | ABI and function/event/error descriptions from NatSpec comments |
 | Medium | **contractURI** | On-chain ERC-7572 fields: name, symbol, description, image, links |
 | Highest | **Repository** | Curated JSON from the [evmnow/contract-metadata](https://github.com/evmnow/contract-metadata) repo — full control over every field |
 
 Higher-priority sources override lower ones. Record sections (`actions`, `events`, `errors`, `messages`, `groups`) are shallow-merged per key, so a repository entry can add a `title` to an action while keeping the NatSpec `description` from Sourcify.
+
+Contracts whose final ABI (after proxy composition) implements ERC-20 or ERC-721 get the corresponding interface layer automatically — labeled actions, groups, and semantic types like `token-amount` — with no curated document required. When no layer provides a `name`/`symbol`, they are read from the contract itself (`result.interfaces` reports what was detected).
 
 ## Configuration
 
@@ -66,6 +69,7 @@ const client = createContractClient({
     contractURI: true,  // default: true (requires rpc)
     sourcify: true,     // default: true
     proxy: true,        // default: true (requires rpc; detects ERC-2535 diamonds and proxies)
+    interfaces: true,   // default: true (ERC-20/ERC-721 detection from the ABI; name()/symbol() fill requires rpc)
   },
 
   // Opt-in fields that aren't included by default
@@ -102,6 +106,7 @@ interface ContractResult {
   sources?: Record<string, string>    // verified source files (requires include.sources)
   deployedBytecode?: string           // deployed bytecode (requires include.deployedBytecode)
   proxy?: ProxyResolution             // resolved ERC-2535 facets / proxy implementations
+  interfaces?: StandardInterface[]    // token standards detected from the final ABI ('erc20' | 'erc721')
 }
 
 interface TargetInfo {

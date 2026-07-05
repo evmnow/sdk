@@ -17,7 +17,8 @@ import {
   ContractNotVerifiedOnSourcifyError,
 } from './errors'
 import { merge, resolveIncludes } from './merge'
-import { resolveEns, getChainId } from './rpc'
+import { detectInterfaces, interfaceDocuments } from './interfaces/detect'
+import { resolveEns, getChainId, ethCall, decodeAbiString } from './rpc'
 import { fetchRepository as fetchRepo } from './sources/repository'
 import { fetchContractURI as fetchUri } from './sources/contract-uri'
 import {
@@ -39,6 +40,10 @@ const DEFAULT_SCHEMA_BASE =
   'https://raw.githubusercontent.com/evmnow/contract-metadata/refs/heads/main/schema'
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
+
+// ERC-20/ERC-721 metadata getters, for the on-chain identity fallback.
+const NAME_SELECTOR = '0x06fdde03'    // name()
+const SYMBOL_SELECTOR = '0x95d89b41'  // symbol()
 
 type ClientSourcifyStatus = SourcifyFetchStatus & {
   unavailable?: boolean
@@ -187,7 +192,44 @@ export function createContractClient(config: ContractClientConfig): ContractClie
       )
     }
 
+    if (isEnabled(sources, 'interfaces')) {
+      await applyStandardInterfaces(result)
+    }
+
     return result
+  }
+
+  // Contracts whose (proxy-composed) ABI matches a token standard get the
+  // bundled interface layer even without a curated document — labeled
+  // actions, groups, and semantic types (e.g. token-amount returns) from the
+  // ABI alone. Authored layers stay authoritative: the interface layer merges
+  // at the lowest priority.
+  async function applyStandardInterfaces(result: ContractResult): Promise<void> {
+    const detected = detectInterfaces(result.abi ?? [])
+    if (detected.length === 0) return
+    result.interfaces = detected
+
+    const layers = detected.map(id => interfaceDocuments[id])
+    result.metadata = {
+      ...merge(...layers, result.metadata),
+      chainId,
+      address: result.address,
+    } as ContractMetadataDocument
+
+    // Token identity lives on-chain anyway — fill whatever no layer set.
+    if (!rpc || (result.metadata.name && result.metadata.symbol)) return
+    const fill = async (key: 'name' | 'symbol', selector: string) => {
+      if (result.metadata[key]) return
+      await ensureRpcChainId()
+      const value = decodeAbiString(
+        await ethCall(rpc, result.address, selector, fetchFn),
+      )
+      if (value) result.metadata[key] = value
+    }
+    await Promise.all([
+      fill('name', NAME_SELECTOR).catch(() => undefined),
+      fill('symbol', SYMBOL_SELECTOR).catch(() => undefined),
+    ])
   }
 
   async function expandProxy(
@@ -377,6 +419,11 @@ export {
   EIP1822_PROXIABLE_SLOT,
 } from './sources/proxy'
 
+// Standard-interface detection + bundled metadata layers
+export { detectInterfaces, interfaceDocuments } from './interfaces/detect'
+export { erc20Interface } from './interfaces/erc20'
+export { erc721Interface } from './interfaces/erc721'
+
 // Per-source fetchers
 export { fetchRepository } from './sources/repository'
 export { fetchContractURI } from './sources/contract-uri'
@@ -436,6 +483,7 @@ export type {
   ContractClientConfig,
   ContractClient,
   ContractResult,
+  StandardInterface,
   ProxyResolution,
   ProxyPattern,
   TargetInfo,

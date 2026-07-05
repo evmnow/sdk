@@ -1,0 +1,362 @@
+import type { ContractMetadataDocument } from '../types'
+
+/**
+ * Bundled copy of the `interface:erc721` metadata layer from the
+ * contract-metadata repository (`schema/interfaces/erc721.json`).
+ * Applied as the lowest-priority layer when {@link detectInterfaces}
+ * matches the standard, so ABI-only contracts get labeled actions and
+ * semantic types without a curated per-address document.
+ */
+export const erc721Interface: Partial<ContractMetadataDocument> = {
+  "groups": {
+    "erc721": {
+      "label": "ERC-721",
+      "order": 99
+    }
+  },
+  "actions": {
+    "name": {
+      "title": "Name",
+      "description": "The name of the token collection.",
+      "stateMutability": "view",
+      "group": "erc721"
+    },
+    "symbol": {
+      "title": "Symbol",
+      "description": "The token symbol.",
+      "stateMutability": "view",
+      "group": "erc721"
+    },
+    "totalSupply": {
+      "title": "Total Supply",
+      "description": "Total number of tokens in existence.",
+      "stateMutability": "view",
+      "group": "erc721"
+    },
+    "balanceOf": {
+      "title": "Balance",
+      "description": "Check how many tokens an address owns.",
+      "stateMutability": "view",
+      "group": "erc721",
+      "params": {
+        "owner": {
+          "label": "holder",
+          "type": "address"
+        }
+      }
+    },
+    "my-balance": {
+      "function": "balanceOf",
+      "title": "My Balance",
+      "description": "Check how many tokens you own in this collection.",
+      "stateMutability": "view",
+      "group": "erc721",
+      "params": {
+        "owner": {
+          "label": "holder",
+          "type": "address",
+          "autofill": "connected-address",
+          "hidden": true
+        }
+      }
+    },
+    "ownerOf": {
+      "title": "Owner",
+      "description": "Look up the current owner of a specific token.",
+      "stateMutability": "view",
+      "group": "erc721",
+      "params": {
+        "tokenId": {
+          "label": "token ID",
+          "type": "token-id"
+        }
+      },
+      "returns": {
+        "_0": {
+          "label": "owner",
+          "type": "address"
+        }
+      }
+    },
+    "tokenURI": {
+      "title": "Token URI",
+      "description": "Returns the metadata URI for a specific token.",
+      "stateMutability": "view",
+      "group": "erc721",
+      "params": {
+        "tokenId": {
+          "label": "token ID",
+          "type": "token-id"
+        }
+      }
+    },
+    "approve": {
+      "title": "Approve",
+      "description": "Approve an address to transfer a specific token on your behalf.",
+      "group": "erc721",
+      "intent": "Approve {to} to transfer token #{tokenId}",
+      "params": {
+        "to": {
+          "label": "operator",
+          "type": "address"
+        },
+        "tokenId": {
+          "label": "token ID",
+          "type": "token-id"
+        }
+      },
+      "related": [
+        "revoke",
+        "getApproved"
+      ]
+    },
+    "revoke": {
+      "function": "approve",
+      "title": "Revoke Approval",
+      "description": "Revoke a per-token approval by setting the operator to the zero address.",
+      "group": "erc721",
+      "intent": "Revoke approval for token #{tokenId}",
+      "params": {
+        "to": {
+          "label": "operator",
+          "type": "address",
+          "autofill": "zero-address",
+          "hidden": true
+        },
+        "tokenId": {
+          "label": "token ID",
+          "type": "token-id"
+        }
+      },
+      "related": [
+        "approve",
+        "getApproved"
+      ]
+    },
+    "getApproved": {
+      "title": "Get Approved",
+      "description": "Check which address is approved to transfer a specific token.",
+      "stateMutability": "view",
+      "group": "erc721",
+      "params": {
+        "tokenId": {
+          "label": "token ID",
+          "type": "token-id"
+        }
+      },
+      "returns": {
+        "_0": {
+          "label": "approved operator",
+          "type": "address"
+        }
+      }
+    },
+    "setApprovalForAll": {
+      "title": "Set Approval for All",
+      "description": "Approve or revoke an operator to manage all your tokens.",
+      "group": "erc721",
+      "warning": "Grants full control over all your tokens in this collection to this operator.",
+      "params": {
+        "operator": {
+          "label": "operator",
+          "type": "address"
+        },
+        "approved": {
+          "label": "approved"
+        }
+      },
+      "related": [
+        "grant-approval-for-all",
+        "revoke-approval-for-all",
+        "isApprovedForAll"
+      ]
+    },
+    "grant-approval-for-all": {
+      "function": "setApprovalForAll",
+      "title": "Grant Operator Approval",
+      "description": "Give an operator permission to manage every token you own in this collection.",
+      "group": "erc721",
+      "intent": "Grant {operator} operator approval for all tokens",
+      "warning": "This operator will be able to transfer any of your tokens at any time.",
+      "params": {
+        "operator": {
+          "label": "operator",
+          "type": "address"
+        },
+        "approved": {
+          "label": "approved",
+          "autofill": {
+            "type": "constant",
+            "value": "true"
+          },
+          "hidden": true
+        }
+      },
+      "related": [
+        "setApprovalForAll",
+        "revoke-approval-for-all",
+        "isApprovedForAll"
+      ]
+    },
+    "revoke-approval-for-all": {
+      "function": "setApprovalForAll",
+      "title": "Revoke Operator Approval",
+      "description": "Revoke an operator's permission to manage your tokens in this collection.",
+      "group": "erc721",
+      "intent": "Revoke {operator}'s operator approval",
+      "params": {
+        "operator": {
+          "label": "operator",
+          "type": "address"
+        },
+        "approved": {
+          "label": "approved",
+          "autofill": {
+            "type": "constant",
+            "value": "false"
+          },
+          "hidden": true
+        }
+      },
+      "related": [
+        "setApprovalForAll",
+        "grant-approval-for-all",
+        "isApprovedForAll"
+      ]
+    },
+    "isApprovedForAll": {
+      "title": "Is Approved for All",
+      "description": "Check whether an operator is approved to manage all tokens for an owner.",
+      "stateMutability": "view",
+      "group": "erc721",
+      "params": {
+        "owner": {
+          "label": "owner",
+          "type": "address"
+        },
+        "operator": {
+          "label": "operator",
+          "type": "address"
+        }
+      }
+    },
+    "transferFrom": {
+      "title": "Transfer",
+      "description": "Transfer a token to another address.",
+      "group": "erc721",
+      "intent": "Transfer token #{tokenId} from {from} to {to}",
+      "params": {
+        "from": {
+          "label": "from",
+          "type": "address"
+        },
+        "to": {
+          "label": "to",
+          "type": "address"
+        },
+        "tokenId": {
+          "label": "token ID",
+          "type": "token-id"
+        }
+      }
+    },
+    "safeTransferFrom": {
+      "function": "safeTransferFrom(address,address,uint256)",
+      "title": "Safe Transfer",
+      "description": "Transfer a token to another address, reverting if the recipient cannot receive ERC-721 tokens.",
+      "group": "erc721",
+      "intent": "Transfer token #{tokenId} from {from} to {to}",
+      "params": {
+        "from": {
+          "label": "from",
+          "type": "address"
+        },
+        "to": {
+          "label": "to",
+          "type": "address"
+        },
+        "tokenId": {
+          "label": "token ID",
+          "type": "token-id"
+        }
+      },
+      "related": [
+        "safeTransferFrom-with-data"
+      ]
+    },
+    "safeTransferFrom-with-data": {
+      "function": "safeTransferFrom(address,address,uint256,bytes)",
+      "title": "Safe Transfer (with Data)",
+      "description": "Safe transfer that also forwards extra data to the recipient's onERC721Received hook.",
+      "group": "erc721",
+      "intent": "Transfer token #{tokenId} from {from} to {to}",
+      "params": {
+        "from": {
+          "label": "from",
+          "type": "address"
+        },
+        "to": {
+          "label": "to",
+          "type": "address"
+        },
+        "tokenId": {
+          "label": "token ID",
+          "type": "token-id"
+        },
+        "data": {
+          "label": "data",
+          "description": "Extra bytes passed through to the recipient contract."
+        }
+      },
+      "related": [
+        "safeTransferFrom"
+      ]
+    }
+  },
+  "events": {
+    "Transfer": {
+      "description": "Emitted when a token is transferred.",
+      "params": {
+        "from": {
+          "label": "from"
+        },
+        "to": {
+          "label": "to"
+        },
+        "tokenId": {
+          "label": "token ID",
+          "type": "token-id"
+        }
+      }
+    },
+    "Approval": {
+      "description": "Emitted when an approval is set for a specific token.",
+      "params": {
+        "owner": {
+          "label": "owner"
+        },
+        "approved": {
+          "label": "approved operator"
+        },
+        "tokenId": {
+          "label": "token ID",
+          "type": "token-id"
+        }
+      }
+    },
+    "ApprovalForAll": {
+      "description": "Emitted when an operator is approved or revoked for all tokens.",
+      "params": {
+        "owner": {
+          "label": "owner"
+        },
+        "operator": {
+          "label": "operator"
+        },
+        "approved": {
+          "label": "approved"
+        }
+      }
+    }
+  }
+}
