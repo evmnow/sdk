@@ -1,6 +1,7 @@
 import { parse, toMetadata } from '@1001-digital/natspec'
 import type { SourcifyUserDoc, SourcifyDevDoc } from '@1001-digital/natspec'
 import type {
+  AbiItem,
   ContractMetadataDocument,
   SourcifyResult,
   ActionMeta,
@@ -8,6 +9,7 @@ import type {
   ErrorMeta,
 } from '../types'
 import { ContractMetadataFetchError } from '../errors'
+import { isRecord } from '../merge'
 
 const DEFAULT_SOURCIFY_URL = 'https://sourcify.dev/server'
 
@@ -19,11 +21,55 @@ interface SourcifyResponse {
   abi?: unknown[]
   userdoc?: SourcifyUserDoc
   devdoc?: SourcifyDevDoc
-  deployedBytecode?: string
+  runtimeBytecode?: { onchainBytecode?: string }
   sources?: Record<string, SourcifySource>
 }
 
-const BASE_FIELDS = 'abi,userdoc,devdoc'
+const BASE_FIELDS = ['abi', 'userdoc', 'devdoc'] as const
+
+/**
+ * The field selectors the Sourcify v2 `GET /v2/contract/{chainId}/{address}`
+ * endpoint accepts. Anything else makes the live API respond with HTTP 400
+ * (notably `deployedBytecode`, which is NOT a valid selector — the onchain
+ * bytecode lives under `runtimeBytecode.onchainBytecode`).
+ */
+export const SOURCIFY_V2_FIELDS = new Set([
+  'matchId',
+  'creationMatch',
+  'runtimeMatch',
+  'verifiedAt',
+  'abi',
+  'userdoc',
+  'devdoc',
+  'metadata',
+  'sources',
+  'sourceIds',
+  'storageLayout',
+  'runtimeBytecode',
+  'creationBytecode',
+  'deployment',
+  'compilation',
+  'proxyResolution',
+  'stdJsonInput',
+  'stdJsonOutput',
+])
+
+/**
+ * Build the `fields` query value: base fields + extras, mapped to valid
+ * Sourcify v2 selectors (legacy `deployedBytecode` → `runtimeBytecode`),
+ * deduplicated, and filtered against {@link SOURCIFY_V2_FIELDS} so an
+ * invalid selector can never reach the API.
+ */
+export function buildSourcifyFields(extraFields?: string[]): string {
+  const fields: string[] = [...BASE_FIELDS]
+  for (const field of extraFields ?? []) {
+    const mapped = field === 'deployedBytecode' ? 'runtimeBytecode' : field
+    if (SOURCIFY_V2_FIELDS.has(mapped) && !fields.includes(mapped)) {
+      fields.push(mapped)
+    }
+  }
+  return fields.join(',')
+}
 
 export interface SourcifyFetchStatus {
   result: SourcifyResult | null
@@ -50,9 +96,7 @@ export async function fetchSourcifyWithStatus(
   baseUrl = DEFAULT_SOURCIFY_URL,
   extraFields?: string[],
 ): Promise<SourcifyFetchStatus> {
-  const fields = extraFields?.length
-    ? `${BASE_FIELDS},${extraFields.join(',')}`
-    : BASE_FIELDS
+  const fields = buildSourcifyFields(extraFields)
   const url = `${baseUrl}/v2/contract/${chainId}/${address}?fields=${fields}`
 
   let res: Response
@@ -72,27 +116,34 @@ export async function fetchSourcifyWithStatus(
   }
 
   let data: SourcifyResponse
+  let metadata: ReturnType<typeof toMetadata>
   try {
-    data = await res.json() as SourcifyResponse
+    const json: unknown = await res.json()
+    if (!isRecord(json)) {
+      throw new Error('Sourcify response is not a JSON object')
+    }
+    data = json as SourcifyResponse
+
+    const userdoc = isRecord(data.userdoc) ? data.userdoc : { methods: {} }
+    const devdoc = isRecord(data.devdoc) ? data.devdoc : { methods: {} }
+    metadata = toMetadata(parse(userdoc, devdoc))
   } catch (e) {
     throw new ContractMetadataFetchError(
-      'sourcify', res.status, 'Invalid JSON from Sourcify', { cause: e },
+      'sourcify', res.status, 'Invalid response from Sourcify', { cause: e },
     )
   }
 
-  const userdoc = data.userdoc ?? { methods: {} }
-  const devdoc = data.devdoc ?? { methods: {} }
-
-  const natspec = parse(userdoc, devdoc)
-  const metadata = toMetadata(natspec)
-
   const result: SourcifyResult = {}
 
-  if (data.abi) result.abi = data.abi
-  if (data.userdoc) result.userdoc = data.userdoc as Record<string, unknown>
-  if (data.devdoc) result.devdoc = data.devdoc as Record<string, unknown>
-  if (data.deployedBytecode) result.deployedBytecode = data.deployedBytecode
-  if (data.sources) {
+  if (Array.isArray(data.abi)) result.abi = data.abi as AbiItem[]
+  if (isRecord(data.userdoc)) result.userdoc = data.userdoc as Record<string, unknown>
+  if (isRecord(data.devdoc)) result.devdoc = data.devdoc as Record<string, unknown>
+  // Sourcify v2 exposes the onchain runtime bytecode under
+  // `runtimeBytecode.onchainBytecode`; surface it as `deployedBytecode`.
+  if (typeof data.runtimeBytecode?.onchainBytecode === 'string') {
+    result.deployedBytecode = data.runtimeBytecode.onchainBytecode
+  }
+  if (isRecord(data.sources)) {
     result.sources = Object.fromEntries(
       Object.entries(data.sources).map(([path, src]) => [path, src.content]),
     )

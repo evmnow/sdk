@@ -53,7 +53,9 @@ export interface ActionResolutionResult {
 }
 
 const SELECTOR_RE = /^0x[0-9a-f]{8}$/i
-const SIGNATURE_RE = /^[a-zA-Z_][a-zA-Z0-9_]*\(.*\)$/
+// Matches the signature grammar in src/validate.ts — `$` is a valid Solidity
+// identifier character.
+const SIGNATURE_RE = /^[a-zA-Z_$][a-zA-Z0-9_$]*\(.*\)$/
 
 function isAbiFunction(item: unknown): item is AbiFunction {
   if (typeof item !== 'object' || item === null) return false
@@ -439,7 +441,9 @@ function evaluateCandidate(action: ResolvedAction, call: DecodedCall): Candidate
   }
 
   if (action.meta.value) {
-    applyConstraint(action.meta.value, call.value)
+    // Decoders routinely omit `value` for zero-value calls — treat a missing
+    // value as 0 so a locked zero-value expectation still matches.
+    applyConstraint(action.meta.value, call.value ?? 0n)
   }
   return candidate
 }

@@ -409,6 +409,22 @@ describe('resolveActions', () => {
     expect(issue).toBeTruthy()
     expect(issue!.message).toContain('value')
   })
+
+  it('resolves signature references containing $ identifiers', () => {
+    // `$` is valid in Solidity-adjacent identifiers — the signature grammar
+    // must match validate.ts.
+    const abi = [
+      { type: 'function', name: '$transfer', inputs: [{ name: 'to', type: 'address' }] },
+      { type: 'function', name: '$transfer', inputs: [] },
+    ]
+    const doc: Partial<ContractMetadataDocument> = {
+      actions: { send: { function: '$transfer(address)' } },
+    }
+    const { actions, issues } = resolveActions(abi, doc)
+    expect(issues).toHaveLength(0)
+    const send = actions.find(a => a.id === 'send')
+    expect(send?.signature).toBe('$transfer(address)')
+  })
 })
 
 describe('matchAction', () => {
@@ -607,6 +623,47 @@ describe('matchAction', () => {
       value: 5n,
     })
     expect(other?.id).toBe('mint')
+  })
+
+  it('treats a missing call.value as zero for locked value constraints', () => {
+    // Decoders routinely omit `value` for zero-value calls — a locked
+    // zero-value expectation must still match them.
+    const doc: Partial<ContractMetadataDocument> = {
+      actions: {
+        mint: { title: 'Mint' },
+        'mint-free': {
+          function: 'mint',
+          title: 'Free Mint',
+          value: {
+            autofill: { type: 'constant', value: '0' },
+            hidden: true,
+          },
+        },
+      },
+    }
+    const { actions } = resolveActions([MINT_ABI], doc)
+    const selector = actions.find(a => a.id === 'mint')!.selector
+
+    const withoutValue = matchAction(actions, {
+      selector,
+      args: { amount: 1n },
+      // no `value` key at all
+    })
+    expect(withoutValue?.id).toBe('mint-free')
+
+    const withZero = matchAction(actions, {
+      selector,
+      args: { amount: 1n },
+      value: 0n,
+    })
+    expect(withZero?.id).toBe('mint-free')
+
+    const withNonZero = matchAction(actions, {
+      selector,
+      args: { amount: 1n },
+      value: 5n,
+    })
+    expect(withNonZero?.id).toBe('mint')
   })
 
   it('breaks ties by lowest order, then lexicographically smallest id', () => {

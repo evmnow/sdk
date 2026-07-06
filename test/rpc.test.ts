@@ -40,6 +40,7 @@ describe('ethCall', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: expect.stringContaining('"method":"eth_call"'),
+      signal: expect.any(AbortSignal),
     })
   })
 

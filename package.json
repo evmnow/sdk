@@ -1,14 +1,38 @@
 {
   "name": "@evmnow/sdk",
   "version": "0.6.0",
+  "description": "Resolve complete contract metadata for any EVM contract — curated repository, ERC-7572 contractURI, Sourcify + NatSpec, and proxy/diamond resolution — merged into a single document.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/evmnow/sdk.git"
+  },
+  "keywords": [
+    "ethereum",
+    "evm",
+    "contract-metadata",
+    "sourcify",
+    "natspec",
+    "abi",
+    "erc-7572",
+    "erc-2535",
+    "proxy",
+    "diamond"
+  ],
   "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=18"
+  },
   "type": "module",
   "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./actions": {
+      "types": "./dist/actions.d.ts",
+      "import": "./dist/actions.js"
     },
     "./merge": {
       "types": "./dist/merge.d.ts",
@@ -17,6 +41,10 @@
     "./format": {
       "types": "./dist/format.d.ts",
       "import": "./dist/format.js"
+    },
+    "./natspec": {
+      "types": "./dist/natspec.d.ts",
+      "import": "./dist/natspec.js"
     },
     "./token": {
       "types": "./dist/token.d.ts",
@@ -46,6 +74,18 @@
       "types": "./dist/errors.d.ts",
       "import": "./dist/errors.js"
     },
+    "./interfaces/detect": {
+      "types": "./dist/interfaces/detect.d.ts",
+      "import": "./dist/interfaces/detect.js"
+    },
+    "./interfaces/erc20": {
+      "types": "./dist/interfaces/erc20.d.ts",
+      "import": "./dist/interfaces/erc20.js"
+    },
+    "./interfaces/erc721": {
+      "types": "./dist/interfaces/erc721.d.ts",
+      "import": "./dist/interfaces/erc721.js"
+    },
     "./sources/repository": {
       "types": "./dist/sources/repository.d.ts",
       "import": "./dist/sources/repository.js"
@@ -61,7 +101,8 @@
     "./sources/proxy": {
       "types": "./dist/sources/proxy.d.ts",
       "import": "./dist/sources/proxy.js"
-    }
+    },
+    "./package.json": "./package.json"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -75,6 +116,8 @@
     "build": "vite build",
     "test": "vitest run",
     "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "pnpm build && pnpm test",
     "changeset": "changeset"
   },
   "dependencies": {
@@ -85,6 +128,7 @@
   "devDependencies": {
     "@changesets/changelog-github": "^0.6.0",
     "@changesets/cli": "^2.30.0",
+    "typescript": "^5.7.0",
     "vite": "^6.0.0",
     "vite-plugin-dts": "^4.0.0",
     "vitest": "^3.0.0"

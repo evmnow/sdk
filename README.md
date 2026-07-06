@@ -8,6 +8,8 @@ Resolve complete contract metadata for any EVM contract from multiple sources �
 npm install @evmnow/sdk
 ```
 
+Requires Node.js >= 18 (or any runtime with global `fetch` and `AbortSignal.timeout`).
+
 ## Quick start
 
 ```ts
@@ -58,10 +60,13 @@ const client = createContractClient({
   // Optional
   rpc: 'https://eth.llamarpc.com',        // needed for contractURI, diamonds/proxies, ENS on mainnet
   ensRpc: 'https://eth.llamarpc.com',     // mainnet RPC for ENS when chainId !== 1
+  ensResolver: '0x...',                   // custom ENS Universal Resolver address (default: canonical mainnet deployment)
   repositoryUrl: '...',                   // custom metadata repo base URL
   sourcifyUrl: 'https://sourcify.dev/server',
+  schemaBaseUrl: 'https://evmnow.github.io/contract-metadata/v1', // base for `includes` interface resolution (https only)
   ipfsGateway: 'https://ipfs.io',
   fetch: customFetch,                     // custom fetch implementation
+  cache: true,                            // memoize repository/Sourcify lookups per client (default: true)
 
   // Disable specific sources globally
   sources: {
@@ -82,7 +87,15 @@ const client = createContractClient({
 
 ENS resolution only works on Ethereum mainnet. If `chainId === 1`, `rpc` is reused for ENS; otherwise set `ensRpc` explicitly to enable `.eth` name lookups.
 
-The SDK performs a one-time consistency check that `config.chainId` matches the RPC's `eth_chainId`, the first time an RPC-dependent method runs.
+### ENS limitations
+
+- Only `.eth` names are supported — anything that isn't a `0x` address or doesn't end in `.eth` (case-insensitively) is rejected with `InvalidAddressError`.
+- Names are ASCII-lowercased before hashing (so `Vitalik.eth` and `VITALIK.ETH` resolve like `vitalik.eth`), but full [ENSIP-15](https://docs.ens.domains/ensip/15) normalization of non-ASCII names is **not** performed — exotic Unicode names may hash differently than in a fully normalizing client.
+- CCIP-Read / offchain names (e.g. `*.cb.id` and other offchain-resolver subdomains) won't resolve — the SDK does not follow `OffchainLookup` reverts.
+
+Addresses in EIP-55 mixed case are checksum-validated: a mixed-case address whose casing doesn't match its checksum is rejected with `InvalidAddressError` (it likely contains a typo). All-lowercase and all-uppercase addresses carry no checksum and are accepted as-is.
+
+The SDK performs a one-time consistency check that `config.chainId` matches the RPC's `eth_chainId`, the first time an RPC-dependent method runs. A mismatch surfaces as `ChainIdMismatchError`.
 
 ## API
 
@@ -101,10 +114,10 @@ interface ContractResult {
   chainId: number
   address: string
   metadata: ContractMetadataDocument  // merged metadata from all sources
-  abi?: unknown[]                     // ABI from Sourcify (composite for diamonds)
+  abi?: AbiItem[]                     // ABI from Sourcify (composite for diamonds)
   natspec?: NatSpec                   // raw userdoc/devdoc (merged across facets)
   sources?: Record<string, string>    // verified source files (requires include.sources)
-  deployedBytecode?: string           // deployed bytecode (requires include.deployedBytecode)
+  deployedBytecode?: string           // onchain runtime bytecode (requires include.deployedBytecode)
   proxy?: ProxyResolution             // resolved ERC-2535 facets / proxy implementations
   interfaces?: StandardInterface[]    // token standards detected from the final ABI ('erc20' | 'erc721')
 }
@@ -112,7 +125,7 @@ interface ContractResult {
 interface TargetInfo {
   address: string
   selectors?: string[] // defined for diamond facets
-  abi?: unknown[]      // filtered to selectors for diamond facets
+  abi?: AbiItem[]      // filtered to selectors for diamond facets
   natspec?: NatSpec
   sources?: Record<string, string> // requires include.sources
 }
@@ -120,10 +133,15 @@ interface TargetInfo {
 interface ProxyResolution {
   pattern: ProxyPattern
   targets: TargetInfo[]
-  compositeAbi?: unknown[]
-  natspec?: NatSpec
+  beacon?: string             // EIP-1967 beacon address (only for 'eip-1967-beacon')
+  admin?: string              // proxy admin address (eip-1967 / zeppelinos when the admin slot is set)
+  compositeAbi?: AbiItem[]    // deduped ABI across every target
+  natspec?: NatSpec           // merged userdoc/devdoc across targets (first target wins)
+  metadataLayer?: Partial<ContractMetadataDocument> // actions/events/errors distilled from target NatSpec (first target wins)
 }
 ```
+
+Note on `include.deployedBytecode`: the deployed bytecode is requested from Sourcify v2 as the `runtimeBytecode` field (`deployedBytecode` is not a valid v2 selector) and surfaced as `result.deployedBytecode` from `runtimeBytecode.onchainBytecode`.
 
 Per-call overrides mirror the config shape:
 
@@ -139,7 +157,7 @@ Throws `ContractMetadataNotFoundError` if no source returns any data. Not-found 
 
 ### `client.fetchRepository(address)`
 
-Fetch only the repository source. Returns `null` if not found.
+Fetch only the repository source. Looks up the chain-scoped layout (`contracts/{chainId}/{address}.json`) first and falls back to the legacy flat layout (`contracts/{address}.json`). A document whose own `chainId` field disagrees with the client's chain is discarded. Returns `null` if not found.
 
 ### `client.fetchContractURI(address)`
 
@@ -147,7 +165,7 @@ Fetch only the on-chain contractURI. Returns `null` if not found or no RPC confi
 
 ### `client.fetchSourcify(address)`
 
-Fetch only from Sourcify. Always requests `sources` and `deployedBytecode` alongside the base fields, and returns the raw `SourcifyResult` (ABI, parsed NatSpec, sources, bytecode).
+Fetch only from Sourcify. Always requests `sources` and `runtimeBytecode` alongside the base fields (`abi,userdoc,devdoc`), and returns the raw `SourcifyResult` (ABI, parsed NatSpec, sources, bytecode). The Sourcify v2 `runtimeBytecode.onchainBytecode` value is exposed as `SourcifyResult.deployedBytecode`. Field selectors are validated against the known Sourcify v2 field list before the request is built (the standalone `buildSourcifyFields` helper and `SOURCIFY_V2_FIELDS` set are exported).
 
 ### `client.fetchProxy(address, options?)`
 
@@ -157,11 +175,15 @@ Resolve ERC-2535 diamond facets or proxy implementation targets without running 
 interface ProxyResolution {
   pattern: ProxyPattern
   targets: TargetInfo[]       // ERC-2535 facets or proxy implementations, plus ABI / NatSpec when Sourcify is enabled
-  compositeAbi?: unknown[]    // deduped ABI across every target
-  natspec?: NatSpec           // merged userdoc/devdoc across targets
-  metadataLayer?: Partial<ContractMetadataDocument>  // actions/events/errors ready to merge
+  beacon?: string             // EIP-1967 beacon address (only for 'eip-1967-beacon')
+  admin?: string              // proxy admin address (eip-1967 / zeppelinos when the admin slot is set)
+  compositeAbi?: AbiItem[]    // deduped ABI across every target
+  natspec?: NatSpec           // merged userdoc/devdoc across targets (first target wins)
+  metadataLayer?: Partial<ContractMetadataDocument>  // actions/events/errors ready to merge (first target wins)
 }
 ```
+
+For diamond facets, everything derived from a facet — ABI, NatSpec `methods`, and NatSpec-derived actions — is filtered to the selectors actually mounted on the diamond, so unmounted facet functions can't inject actions.
 
 Per-target Sourcify lookups can be skipped when you only need the topology:
 
@@ -233,7 +255,7 @@ Repository metadata can reference shared interfaces via the `includes` field:
 }
 ```
 
-Interfaces are fetched from the schema repo and merged as a base layer, with the document's own fields taking priority.
+Interfaces are fetched from the schema base URL (`schemaBaseUrl` config, default `https://evmnow.github.io/contract-metadata/v1`, resolved as `{schemaBaseUrl}/interfaces/{name}.json`) and merged as a base layer, with the document's own fields taking priority. Full `https://` URLs are also accepted in `includes`; any other scheme (including `http://`) is skipped.
 
 ## Diamonds (ERC-2535) and Proxies
 
@@ -255,18 +277,30 @@ Every module is published as a subpath export, so consumers can import a single 
 
 ```ts
 import { merge, resolveIncludes } from '@evmnow/sdk/merge'
+import { resolveActions, matchAction, paramMetaAt, actionRequiresSender } from '@evmnow/sdk/actions'
+import { mergeNatspecDocs } from '@evmnow/sdk/natspec'
 import { resolveUri } from '@evmnow/sdk/uri'
-import { namehash, dnsEncode } from '@evmnow/sdk/ens'
-import { ethCall, resolveEns, getChainId, decodeAbiString } from '@evmnow/sdk/rpc'
+import { namehash, dnsEncode, normalizeEnsName } from '@evmnow/sdk/ens'
+import { ethCall, resolveEns, getChainId, decodeAbiString, UNIVERSAL_RESOLVER } from '@evmnow/sdk/rpc'
+import { createTokenInfoResolver, decodeSymbol, sanitizeSymbol } from '@evmnow/sdk/token'
+import { detectInterfaces, interfaceDocuments } from '@evmnow/sdk/interfaces/detect'
+import { erc20Interface } from '@evmnow/sdk/interfaces/erc20'
+import { erc721Interface } from '@evmnow/sdk/interfaces/erc721'
 import { fetchRepository } from '@evmnow/sdk/sources/repository'
 import { fetchContractURI } from '@evmnow/sdk/sources/contract-uri'
-import { fetchSourcify, buildSourcifyLayer } from '@evmnow/sdk/sources/sourcify'
+import {
+  fetchSourcify,
+  buildSourcifyLayer,
+  buildSourcifyFields,
+  SOURCIFY_V2_FIELDS,
+} from '@evmnow/sdk/sources/sourcify'
 import {
   fetchProxy,
   detectProxy,
   detectDiamond,
   enrichTargets,
   composeProxyResolution,
+  filterSourcifyBySelectors,
   decodeFacets,
   computeSelector,
   canonicalSignature,
@@ -283,6 +317,9 @@ import {
   ContractNotVerifiedOnSourcifyError,
   ContractMetadataFetchError,
   ENSResolutionError,
+  InvalidAddressError,
+  ChainIdMismatchError,
+  ContractClientConfigError,
 } from '@evmnow/sdk/errors'
 ```
 
@@ -314,6 +351,9 @@ import {
   ContractNotVerifiedOnSourcifyError,
   ContractMetadataFetchError,
   ENSResolutionError,
+  InvalidAddressError,
+  ChainIdMismatchError,
+  ContractClientConfigError,
 } from '@evmnow/sdk'
 
 try {
@@ -327,6 +367,15 @@ try {
   }
   if (e instanceof ENSResolutionError) {
     // ENS name could not be resolved
+  }
+  if (e instanceof InvalidAddressError) {
+    // Not an address/.eth name, or the EIP-55 checksum is wrong (e.input)
+  }
+  if (e instanceof ChainIdMismatchError) {
+    // config.chainId disagrees with the RPC (e.expected vs e.actual)
+  }
+  if (e instanceof ContractClientConfigError) {
+    // e.g. ENS lookup attempted without a mainnet ensRpc
   }
 }
 ```

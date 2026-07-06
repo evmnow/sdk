@@ -1,11 +1,13 @@
 import { describe, it, expect, vi } from 'vitest'
 import { resolveUri } from '../src/uri'
 
-function mockFetch(body: unknown, status = 200) {
+function mockFetch(body: unknown, status = 200, headers: Record<string, string> = {}) {
   return vi.fn().mockResolvedValue({
     ok: status >= 200 && status < 300,
     status,
+    headers: { get: (name: string) => headers[name.toLowerCase()] ?? null },
     json: () => Promise.resolve(body),
+    text: () => Promise.resolve(JSON.stringify(body)),
   }) as unknown as typeof fetch
 }
 
@@ -62,6 +64,27 @@ describe('resolveUri', () => {
       'https://gateway.pinata.cloud/ipfs/QmTest123',
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     )
+  })
+
+  it('parses the charset=utf-8 data URI variant', async () => {
+    const json = { name: 'Test' }
+    const uri = `data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify(json))}`
+
+    const result = await resolveUri(uri, mockFetch(null))
+    expect(result).toEqual(json)
+  })
+
+  it('rejects oversized responses via content-length', async () => {
+    const fetchFn = mockFetch({ name: 'huge' }, 200, { 'content-length': String(5_000_000) })
+
+    const result = await resolveUri('https://example.com/meta.json', fetchFn)
+    expect(result).toBeNull()
+  })
+
+  it('rejects oversized response bodies even without content-length', async () => {
+    const huge = { name: 'x'.repeat(1_100_000) }
+    const result = await resolveUri('https://example.com/meta.json', mockFetch(huge))
+    expect(result).toBeNull()
   })
 
   it('returns null for unknown URI scheme', async () => {

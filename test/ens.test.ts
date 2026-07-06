@@ -26,6 +26,11 @@ describe('namehash', () => {
       '0xee6c4522aab0003e8d14cd40a6af439055fd2577951148c14b6cea9a53475835',
     )
   })
+
+  it('lowercases the name before hashing (Vitalik.eth === vitalik.eth)', () => {
+    expect(namehash('Vitalik.eth')).toBe(namehash('vitalik.eth'))
+    expect(namehash('VITALIK.ETH')).toBe(namehash('vitalik.eth'))
+  })
 })
 
 describe('dnsEncode', () => {
@@ -37,5 +42,9 @@ describe('dnsEncode', () => {
   it('encodes multi-label name', () => {
     // 'foo.eth' -> 03 66 6f 6f 03 65 74 68 00
     expect(dnsEncode('foo.eth')).toBe('0x03666f6f0365746800')
+  })
+
+  it('lowercases the name before encoding', () => {
+    expect(dnsEncode('Foo.ETH')).toBe('0x03666f6f0365746800')
   })
 })

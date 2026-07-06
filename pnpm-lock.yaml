@@ -24,6 +24,9 @@ importers:
       '@changesets/cli':
         specifier: ^2.30.0
         version: 2.30.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
       vite:
         specifier: ^6.0.0
         version: 6.4.2

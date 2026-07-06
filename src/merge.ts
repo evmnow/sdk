@@ -5,6 +5,15 @@ const RECORD_SECTIONS = ['groups', 'actions', 'events', 'errors', 'messages'] as
 
 type RecordSection = typeof RECORD_SECTIONS[number]
 
+// Keys that would mutate the object prototype when copied onto a plain
+// object (prototype pollution). Metadata documents come from remote JSON —
+// never copy these.
+const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
+
+export function isUnsafeKey(key: string): boolean {
+  return UNSAFE_KEYS.has(key)
+}
+
 /**
  * Merge metadata layers with increasing priority.
  * Pass layers from lowest to highest priority.
@@ -20,7 +29,7 @@ export function merge(
     if (!layer) continue
 
     for (const [key, value] of Object.entries(layer)) {
-      if (value === undefined) continue
+      if (value === undefined || isUnsafeKey(key)) continue
 
       if (isRecordSection(key) && isRecord(value) && isRecord(result[key])) {
         result[key] = { ...(result[key] as Record<string, unknown>), ...value }
@@ -37,6 +46,9 @@ export function merge(
  * Resolve `includes` in a metadata document.
  * Fetches each interface, merges them left-to-right,
  * then overlays the document's own fields on top.
+ *
+ * URL-form includes must be `https:` — anything else is skipped, as are
+ * includes that fail to fetch or don't parse.
  */
 export async function resolveIncludes(
   doc: Partial<ContractMetadataDocument>,
@@ -49,6 +61,7 @@ export async function resolveIncludes(
   const settled = await Promise.allSettled(
     includes.map(async (id) => {
       const url = resolveInterfaceUrl(id, schemaBaseUrl)
+      if (!url) return null
       const res = await fetchFn(url, { signal: AbortSignal.timeout(5_000) })
       if (res.ok) return res.json() as Promise<Partial<ContractMetadataDocument>>
       return null
@@ -65,13 +78,16 @@ export async function resolveIncludes(
   return merge(base, doc)
 }
 
-function resolveInterfaceUrl(id: string, schemaBaseUrl: string): string {
-  if (id.startsWith('http://') || id.startsWith('https://')) return id
+// Returns null for URL-form includes on any scheme other than https:
+// (http:, ipfs:, file:, ...) — remote layers must not load over an
+// unauthenticated transport.
+function resolveInterfaceUrl(id: string, schemaBaseUrl: string): string | null {
+  if (id.includes('://')) return id.startsWith('https://') ? id : null
 
   // Strip optional "interface:" prefix
   const name = id.startsWith('interface:') ? id.slice('interface:'.length) : id
 
-  return `${schemaBaseUrl}/interfaces/${name}.json`
+  return `${schemaBaseUrl.replace(/\/$/, '')}/interfaces/${name}.json`
 }
 
 function isRecordSection(key: string): key is RecordSection {

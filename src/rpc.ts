@@ -3,8 +3,9 @@ import { namehash, dnsEncode } from './ens'
 
 // ENS Universal Resolver on Ethereum mainnet. Resolution only works when
 // `resolveEns` is called with a mainnet RPC — see `ensRpc` in
-// `ContractClientConfig`.
-const UNIVERSAL_RESOLVER = '0xce01f8eee7E479C928F8919abD53E553a36CeF67'
+// `ContractClientConfig`. Overridable per call (and via `ensResolver` in the
+// client config) for forks/testnets or future resolver deployments.
+export const UNIVERSAL_RESOLVER = '0xce01f8eee7E479C928F8919abD53E553a36CeF67'
 
 // Precomputed function selectors
 export const CONTRACT_URI_SELECTOR = '0xe8a3d485'  // contractURI()
@@ -23,6 +24,7 @@ async function jsonRpcCall(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+    signal: AbortSignal.timeout(10_000),
   })
 
   if (!res.ok) {
@@ -60,6 +62,7 @@ export async function resolveEns(
   rpc: string,
   name: string,
   fetchFn: typeof fetch,
+  resolverAddress: string = UNIVERSAL_RESOLVER,
 ): Promise<string> {
   const node = namehash(name)
   const dnsName = dnsEncode(name)
@@ -70,7 +73,7 @@ export async function resolveEns(
 
   const data = RESOLVE_SELECTOR + abiEncodeBytes2(dnsNameBytes, addrCalldataBytes)
 
-  const result = await ethCall(rpc, UNIVERSAL_RESOLVER, data, fetchFn)
+  const result = await ethCall(rpc, resolverAddress, data, fetchFn)
 
   if (result === '0x' || result.length < 130) {
     throw new ENSResolutionError(name)

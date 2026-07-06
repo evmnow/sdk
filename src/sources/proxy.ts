@@ -1,13 +1,16 @@
 import {
   buildCompositeAbi,
+  canonicalSignature,
+  computeSelector,
   detectProxy,
   filterAbiBySelectors,
 } from '@1001-digital/proxies'
 import type { RawProxy, ResolvedTarget } from '@1001-digital/proxies'
-import { merge } from '../merge'
+import { isRecord, merge } from '../merge'
 import { mergeNatspecDocs } from '../natspec'
 import { buildSourcifyLayer, fetchSourcify } from './sourcify'
 import type {
+  AbiItem,
   ContractMetadataDocument,
   NatSpec,
   ProxyResolution,
@@ -65,21 +68,27 @@ export async function enrichTargets(
   rawTargets: ResolvedTarget[],
   sourcifyFetch: ((address: string) => Promise<SourcifyResult | null>) | null,
 ): Promise<{ targets: TargetInfo[]; sourcifyResults: (SourcifyResult | null)[] }> {
-  const sourcifyResults: (SourcifyResult | null)[] = sourcifyFetch
+  const rawResults: (SourcifyResult | null)[] = sourcifyFetch
     ? await Promise.all(
         rawTargets.map(t => sourcifyFetch(t.address).catch(() => null)),
       )
     : rawTargets.map(() => null)
 
+  // Diamond facets are mounted per selector — restrict everything derived
+  // from the facet (ABI, NatSpec methods, actions) to the mounted selectors
+  // so an unmounted facet function can't inject actions into the result.
+  const sourcifyResults = rawResults.map((src, i) => {
+    const selectors = rawTargets[i]!.selectors
+    return src && selectors !== undefined
+      ? filterSourcifyBySelectors(src, selectors)
+      : src
+  })
+
   const targets: TargetInfo[] = rawTargets.map((t, i) => {
     const src = sourcifyResults[i]
     const info: TargetInfo = { address: t.address }
     if (t.selectors !== undefined) info.selectors = t.selectors
-    if (src?.abi) {
-      info.abi = t.selectors !== undefined
-        ? filterAbiBySelectors(src.abi, t.selectors)
-        : src.abi
-    }
+    if (src?.abi) info.abi = src.abi
     if (src?.userdoc || src?.devdoc) {
       info.natspec = { userdoc: src.userdoc, devdoc: src.devdoc }
     }
@@ -90,6 +99,78 @@ export async function enrichTargets(
   })
 
   return { targets, sourcifyResults }
+}
+
+/**
+ * Restrict a facet's SourcifyResult to the selectors mounted on the diamond:
+ * the ABI is filtered via {@link filterAbiBySelectors}, NatSpec `methods`
+ * entries (keyed by canonical signature) and derived `actions` are kept only
+ * when their selector is mounted. Events and errors pass through — they are
+ * not selector-addressable.
+ */
+export function filterSourcifyBySelectors(
+  src: SourcifyResult,
+  selectors: string[],
+): SourcifyResult {
+  const mounted = new Set(selectors.map(s => s.toLowerCase()))
+  const isMountedSignature = (sig: string) =>
+    mounted.has(computeSelector(sig).toLowerCase())
+
+  // Collect every full signature we can see (ABI + NatSpec method keys) to
+  // resolve bare-name action references to mounted function names.
+  const signatures = new Set<string>()
+  if (src.abi) {
+    for (const entry of src.abi) {
+      if (isRecord(entry) && entry.type === 'function' && typeof entry.name === 'string') {
+        signatures.add(canonicalSignature(entry as Parameters<typeof canonicalSignature>[0]))
+      }
+    }
+  }
+  for (const doc of [src.userdoc, src.devdoc]) {
+    if (isRecord(doc) && isRecord(doc.methods)) {
+      for (const key of Object.keys(doc.methods)) {
+        if (key.includes('(')) signatures.add(key)
+      }
+    }
+  }
+  const mountedNames = new Set<string>()
+  for (const sig of signatures) {
+    if (isMountedSignature(sig)) mountedNames.add(sig.slice(0, sig.indexOf('(')))
+  }
+
+  const out: SourcifyResult = { ...src }
+
+  if (src.abi) out.abi = filterAbiBySelectors(src.abi, selectors) as AbiItem[]
+
+  if (src.userdoc) out.userdoc = filterNatspecDoc(src.userdoc, isMountedSignature)
+  if (src.devdoc) out.devdoc = filterNatspecDoc(src.devdoc, isMountedSignature)
+
+  if (src.actions) {
+    const actions: NonNullable<SourcifyResult['actions']> = {}
+    for (const [key, meta] of Object.entries(src.actions)) {
+      const ref = meta.function ?? key
+      const keep = ref.includes('(')
+        ? isMountedSignature(ref)
+        : mountedNames.has(ref)
+      if (keep) actions[key] = meta
+    }
+    if (Object.keys(actions).length > 0) out.actions = actions
+    else delete out.actions
+  }
+
+  return out
+}
+
+function filterNatspecDoc(
+  doc: Record<string, unknown>,
+  isMountedSignature: (sig: string) => boolean,
+): Record<string, unknown> {
+  if (!isRecord(doc.methods)) return doc
+  const methods: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(doc.methods)) {
+    if (key.includes('(') && isMountedSignature(key)) methods[key] = value
+  }
+  return { ...doc, methods }
 }
 
 /**
@@ -104,16 +185,18 @@ export function composeProxyResolution(
 
   const abiLayers = targets
     .map(t => t.abi)
-    .filter((a): a is unknown[] => a !== undefined)
+    .filter((a): a is AbiItem[] => a !== undefined)
   if (abiLayers.length > 0) {
-    out.compositeAbi = buildCompositeAbi(abiLayers)
+    out.compositeAbi = buildCompositeAbi(abiLayers) as AbiItem[]
   }
 
+  // `merge` gives the LAST layer the highest priority; reverse so the first
+  // target wins — consistent with the first-target-wins NatSpec merge below.
   const layers = sourcifyResults
     .map(src => src && buildSourcifyLayer(src))
     .filter((l): l is Partial<ContractMetadataDocument> => !!l)
   if (layers.length > 0) {
-    out.metadataLayer = merge(...layers)
+    out.metadataLayer = merge(...layers.reverse())
   }
 
   const userdoc = mergeNatspecDocs(...targets.map(t => t.natspec?.userdoc))

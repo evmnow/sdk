@@ -1,4 +1,6 @@
+import { keccak_256 } from '@noble/hashes/sha3'
 import type {
+  AbiItem,
   ContractClientConfig,
   ContractClient,
   ContractMetadataDocument,
@@ -13,17 +15,22 @@ import type {
   TargetInfo,
 } from './types'
 import {
+  ChainIdMismatchError,
+  ContractClientConfigError,
   ContractMetadataNotFoundError,
   ContractNotVerifiedOnSourcifyError,
+  InvalidAddressError,
 } from './errors'
 import { merge, resolveIncludes } from './merge'
 import { detectInterfaces, interfaceDocuments } from './interfaces/detect'
-import { resolveEns, getChainId, ethCall, decodeAbiString } from './rpc'
+import { resolveEns, getChainId, ethCall } from './rpc'
+import { decodeSymbol } from './token'
 import { fetchRepository as fetchRepo } from './sources/repository'
 import { fetchContractURI as fetchUri } from './sources/contract-uri'
 import {
   fetchSourcify as fetchSrc,
   fetchSourcifyWithStatus,
+  buildSourcifyFields,
   buildSourcifyLayer,
 } from './sources/sourcify'
 import type { SourcifyFetchStatus } from './sources/sourcify'
@@ -36,14 +43,16 @@ import {
   mergeNatspecDocs,
 } from './sources/proxy'
 
-const DEFAULT_SCHEMA_BASE =
-  'https://raw.githubusercontent.com/evmnow/contract-metadata/refs/heads/main/schema'
+const DEFAULT_SCHEMA_BASE = 'https://evmnow.github.io/contract-metadata/v1'
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 
 // ERC-20/ERC-721 metadata getters, for the on-chain identity fallback.
 const NAME_SELECTOR = '0x06fdde03'    // name()
 const SYMBOL_SELECTOR = '0x95d89b41'  // symbol()
+
+// Display cap for an on-chain name() — hostile contracts can return anything.
+const MAX_NAME_LENGTH = 64
 
 type ClientSourcifyStatus = SourcifyFetchStatus & {
   unavailable?: boolean
@@ -57,10 +66,26 @@ export function createContractClient(config: ContractClientConfig): ContractClie
   const ensRpc = config.ensRpc ?? (chainId === 1 ? rpc : undefined)
   const repositoryUrl = config.repositoryUrl?.replace(/\/$/, '')
   const sourcifyUrl = config.sourcifyUrl?.replace(/\/$/, '')
+  const schemaBaseUrl = config.schemaBaseUrl?.replace(/\/$/, '') ?? DEFAULT_SCHEMA_BASE
   const ipfsGateway = config.ipfsGateway?.replace(/\/$/, '')
   const fetchFn = config.fetch ?? globalThis.fetch
   const defaultSources = config.sources ?? {}
   const defaultInclude = config.include ?? {}
+  const cacheEnabled = config.cache !== false
+
+  // Per-client memoization of repository/Sourcify lookups. Caching the
+  // promise itself deduplicates concurrent in-flight requests; rejected
+  // promises are evicted so transient failures retry on the next call.
+  const memo = new Map<string, Promise<unknown>>()
+  function cached<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    if (!cacheEnabled) return fn()
+    const hit = memo.get(key)
+    if (hit) return hit as Promise<T>
+    const promise = fn()
+    memo.set(key, promise)
+    promise.catch(() => memo.delete(key))
+    return promise
+  }
 
   // Lazy, memoized consistency check between config.chainId and the rpc's
   // eth_chainId. Runs once per client, before the first RPC-dependent call.
@@ -70,9 +95,7 @@ export function createContractClient(config: ContractClientConfig): ContractClie
     if (!rpcCheck) {
       rpcCheck = getChainId(rpc, fetchFn).then(actual => {
         if (actual !== chainId) {
-          throw new Error(
-            `RPC chainId mismatch: config.chainId=${chainId} but rpc returned ${actual}`,
-          )
+          throw new ChainIdMismatchError(chainId, actual)
         }
       })
     }
@@ -81,20 +104,24 @@ export function createContractClient(config: ContractClientConfig): ContractClie
 
   async function resolveAddress(addressOrEns: string): Promise<string> {
     if (ADDRESS_RE.test(addressOrEns)) {
+      validateAddressChecksum(addressOrEns)
       return addressOrEns.toLowerCase()
     }
 
-    if (addressOrEns.endsWith('.eth')) {
+    // Lowercase BEFORE the .eth check so `Vitalik.eth` / `VITALIK.ETH`
+    // route into ENS resolution (namehash normalizes again internally).
+    const ensName = addressOrEns.toLowerCase()
+    if (ensName.endsWith('.eth')) {
       if (!ensRpc) {
-        throw new Error(
+        throw new ContractClientConfigError(
           'ENS resolution requires a mainnet RPC — set `ensRpc`, or set `rpc` when chainId === 1',
         )
       }
-      const resolved = await resolveEns(ensRpc, addressOrEns, fetchFn)
+      const resolved = await resolveEns(ensRpc, ensName, fetchFn, config.ensResolver)
       return resolved.toLowerCase()
     }
 
-    throw new Error(`Invalid address or ENS name: ${addressOrEns}`)
+    throw new InvalidAddressError(addressOrEns)
   }
 
   function effectiveSources(override?: SourceConfig): SourceConfig {
@@ -115,7 +142,9 @@ export function createContractClient(config: ContractClientConfig): ContractClie
 
     const extraFields: string[] = []
     if (include.sources) extraFields.push('sources')
-    if (include.deployedBytecode) extraFields.push('deployedBytecode')
+    // Sourcify v2 exposes the deployed bytecode under `runtimeBytecode` —
+    // `deployedBytecode` is not a valid field selector (HTTP 400).
+    if (include.deployedBytecode) extraFields.push('runtimeBytecode')
 
     const sourcifyEnabled = isEnabled(sources, 'sourcify')
 
@@ -146,7 +175,7 @@ export function createContractClient(config: ContractClientConfig): ContractClie
 
     let repoResult = repoRaw
     if (repoResult?.includes) {
-      repoResult = await resolveIncludes(repoResult, fetchFn, DEFAULT_SCHEMA_BASE)
+      repoResult = await resolveIncludes(repoResult, fetchFn, schemaBaseUrl)
     }
 
     const sourcifyLayer: Partial<ContractMetadataDocument> | null = srcResult
@@ -217,17 +246,20 @@ export function createContractClient(config: ContractClientConfig): ContractClie
     } as ContractMetadataDocument
 
     // Token identity lives on-chain anyway — fill whatever no layer set.
+    // `decodeSymbol` handles legacy bytes32 returns (MKR/SAI-style tokens)
+    // and sanitizes hostile values (control chars stripped, length capped).
     if (!rpc || (result.metadata.name && result.metadata.symbol)) return
-    const fill = async (key: 'name' | 'symbol', selector: string) => {
+    const fill = async (key: 'name' | 'symbol', selector: string, maxLength?: number) => {
       if (result.metadata[key]) return
       await ensureRpcChainId()
-      const value = decodeAbiString(
+      const value = decodeSymbol(
         await ethCall(rpc, result.address, selector, fetchFn),
+        maxLength,
       )
       if (value) result.metadata[key] = value
     }
     await Promise.all([
-      fill('name', NAME_SELECTOR).catch(() => undefined),
+      fill('name', NAME_SELECTOR, MAX_NAME_LENGTH).catch(() => undefined),
       fill('symbol', SYMBOL_SELECTOR).catch(() => undefined),
     ])
   }
@@ -244,14 +276,12 @@ export function createContractClient(config: ContractClientConfig): ContractClie
   ): Promise<void> {
     // Fetch Sourcify directly per target (not through client.get) — this is
     // the structural single-hop guard. Skipped entirely when Sourcify is disabled.
+    const targetFields = includeSources ? ['sources'] : undefined
     const sourcifyFetch = sourcifyEnabled
       ? (a: string) =>
-          fetchSrc(
-            chainId,
-            a,
-            fetchFn,
-            sourcifyUrl,
-            includeSources ? ['sources'] : undefined,
+          cached(
+            `sourcify-result:${a.toLowerCase()}:${buildSourcifyFields(targetFields)}`,
+            () => fetchSrc(chainId, a, fetchFn, sourcifyUrl, targetFields),
           )
       : null
 
@@ -268,9 +298,9 @@ export function createContractClient(config: ContractClientConfig): ContractClie
     // functions itself), then each target's filtered ABI. First-occurrence wins.
     // When the main contract isn't verified, reuse the target-only composite.
     if (srcResult?.abi) {
-      const layers: unknown[][] = [srcResult.abi]
+      const layers: AbiItem[][] = [srcResult.abi]
       for (const t of targets) if (t.abi) layers.push(t.abi)
-      result.abi = buildCompositeAbi(layers)
+      result.abi = buildCompositeAbi(layers) as AbiItem[]
     } else if (derived.compositeAbi) {
       result.abi = derived.compositeAbi
     }
@@ -295,7 +325,10 @@ export function createContractClient(config: ContractClientConfig): ContractClie
   async function fetchRepository(
     address: string,
   ): Promise<Partial<ContractMetadataDocument> | null> {
-    return fetchRepo(chainId, address, fetchFn, repositoryUrl)
+    return cached(
+      `repository:${address.toLowerCase()}`,
+      () => fetchRepo(chainId, address, fetchFn, repositoryUrl),
+    )
   }
 
   async function fetchContractURI(
@@ -310,15 +343,23 @@ export function createContractClient(config: ContractClientConfig): ContractClie
     address: string,
     extraFields?: string[],
   ): Promise<SourcifyFetchStatus> {
-    return fetchSourcifyWithStatus(
-      chainId, address, fetchFn, sourcifyUrl, extraFields,
+    return cached(
+      `sourcify:${address.toLowerCase()}:${buildSourcifyFields(extraFields)}`,
+      () => fetchSourcifyWithStatus(
+        chainId, address, fetchFn, sourcifyUrl, extraFields,
+      ),
     )
   }
 
   async function fetchSourcify(
     address: string,
   ): Promise<SourcifyResult | null> {
-    return fetchSrc(chainId, address, fetchFn, sourcifyUrl, ['sources', 'deployedBytecode'])
+    // `runtimeBytecode` (not `deployedBytecode`) is the valid Sourcify v2
+    // field; its `onchainBytecode` surfaces as `result.deployedBytecode`.
+    const { result } = await fetchSourcifyWithFields(
+      address, ['sources', 'runtimeBytecode'],
+    )
+    return result
   }
 
   async function fetchProxy(
@@ -368,6 +409,37 @@ function joinSourcePath(prefix: string, path: string): string {
   return `${prefix}/${path.replace(/^\/+/, '')}`
 }
 
+// ── EIP-55 checksum validation ──
+
+const encoder = new TextEncoder()
+
+/**
+ * Validate the EIP-55 checksum of a mixed-case address. All-lowercase and
+ * all-uppercase addresses carry no checksum and pass; a mixed-case address
+ * whose casing doesn't match its checksum throws {@link InvalidAddressError}
+ * — it likely contains a typo.
+ */
+function validateAddressChecksum(address: string): void {
+  const hex = address.slice(2)
+  const hasLower = /[a-f]/.test(hex)
+  const hasUpper = /[A-F]/.test(hex)
+  if (!hasLower || !hasUpper) return
+
+  const hash = keccak_256(encoder.encode(hex.toLowerCase()))
+  for (let i = 0; i < 40; i++) {
+    const char = hex[i]!
+    if (!/[a-fA-F]/.test(char)) continue
+    const nibble = (i % 2 === 0 ? hash[i / 2]! >> 4 : hash[(i - 1) / 2]!) & 0x0f
+    const expected = nibble >= 8 ? char.toUpperCase() : char.toLowerCase()
+    if (char !== expected) {
+      throw new InvalidAddressError(
+        address,
+        `Invalid address: EIP-55 checksum mismatch in ${address}`,
+      )
+    }
+  }
+}
+
 // ── Re-exports ──
 
 // Pure merge utilities
@@ -396,7 +468,7 @@ export type {
 } from './format'
 
 // Token identity resolution (on-chain decimals()/symbol() with caching)
-export { createTokenInfoResolver } from './token'
+export { createTokenInfoResolver, decodeSymbol, sanitizeSymbol } from './token'
 export type { TokenInfoResolver, TokenInfoResolverConfig } from './token'
 
 // Intent template rendering
@@ -424,6 +496,7 @@ export {
   detectEip897,
   enrichTargets,
   composeProxyResolution,
+  filterSourcifyBySelectors,
   decodeFacets,
   computeSelector,
   canonicalSignature,
@@ -452,18 +525,21 @@ export {
   fetchSourcify,
   fetchSourcifyWithStatus,
   buildSourcifyLayer,
+  buildSourcifyFields,
+  SOURCIFY_V2_FIELDS,
 } from './sources/sourcify'
 export type { SourcifyFetchStatus } from './sources/sourcify'
 
 // URI + ENS + RPC primitives
 export { resolveUri } from './uri'
-export { namehash, dnsEncode } from './ens'
+export { namehash, dnsEncode, normalizeEnsName } from './ens'
 export {
   ethCall,
   getChainId,
   resolveEns,
   decodeAbiString,
   CONTRACT_URI_SELECTOR,
+  UNIVERSAL_RESOLVER,
 } from './rpc'
 
 // Errors
@@ -473,6 +549,9 @@ export {
   ContractMetadataNotFoundError,
   ContractNotVerifiedOnSourcifyError,
   ENSResolutionError,
+  InvalidAddressError,
+  ChainIdMismatchError,
+  ContractClientConfigError,
 } from './errors'
 
 export type {
@@ -500,6 +579,7 @@ export type {
 
 // Types
 export type {
+  AbiItem,
   ContractMetadataDocument,
   ContractClientConfig,
   ContractClient,

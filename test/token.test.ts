@@ -114,8 +114,32 @@ describe('createTokenInfoResolver', () => {
 
     expect(await resolver.resolve(USDC)).toBeNull()
     expect(await resolver.resolve(USDC)).toBeNull()
-    // decimals() retried on the second resolve
-    expect((fetchFn as any).mock.calls.length).toBe(2)
+    // decimals() retried on the second resolve (decimals()/symbol() are
+    // fetched in parallel, so count decimals() calls specifically)
+    const decimalsCalls = (fetchFn as any).mock.calls.filter((c: any) =>
+      JSON.parse(c[1].body).params[0].data === DECIMALS_SELECTOR,
+    )
+    expect(decimalsCalls.length).toBe(2)
+  })
+
+  it('fetches decimals() and symbol() concurrently', async () => {
+    let pending = 0
+    let maxPending = 0
+    const fetchFn = vi.fn(async (_rpc: unknown, init: any) => {
+      pending++
+      maxPending = Math.max(maxPending, pending)
+      await new Promise(resolve => setTimeout(resolve, 5))
+      pending--
+      const { data } = JSON.parse(init.body).params[0]
+      const result = data === DECIMALS_SELECTOR
+        ? word(6)
+        : abiString('USDC')
+      return { ok: true, json: async () => ({ result }) }
+    }) as unknown as typeof fetch
+
+    const resolver = createTokenInfoResolver({ rpc: 'https://rpc.test', fetchFn })
+    expect(await resolver.resolve(USDC)).toEqual({ decimals: 6, symbol: 'USDC' })
+    expect(maxPending).toBe(2)
   })
 
   it('resolveAll omits unresolvable tokens', async () => {

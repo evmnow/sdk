@@ -135,7 +135,13 @@ export function semanticChecks(
     const selector = section === 'events' ? TOPIC_32BYTE : SELECTOR_4BYTE
     const selectorLabel = section === 'events' ? '32-byte topic hash' : '4-byte selector'
     for (const key of Object.keys(table)) {
-      if (!selector.test(key) && !SIGNATURE_RE.test(key) && /[^a-zA-Z0-9_$]/.test(key)) {
+      // A key that looks like hex must be EXACTLY the section's selector
+      // format (lowercase, full length) — truncated hashes and uppercase hex
+      // silently match nothing at runtime, so they are flagged here.
+      const valid = key.toLowerCase().startsWith('0x')
+        ? selector.test(key)
+        : SIGNATURE_RE.test(key) || BARE_NAME_RE.test(key)
+      if (!valid) {
         issues.push({
           path: `${section}.${key}`,
           message: `${section} key "${key}" is not a valid name, signature, or ${selectorLabel}`,

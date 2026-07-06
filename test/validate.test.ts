@@ -174,6 +174,38 @@ describe('semanticChecks', () => {
     ])
   })
 
+  it('flags truncated and uppercase hex keys in events and errors', () => {
+    const topic = '0x' + 'ab'.repeat(32)
+    const issues = semanticChecks({
+      events: {
+        [topic]: {},                    // valid 32-byte topic
+        '0xddf252ad': {},               // truncated topic hash
+        [topic.toUpperCase().replace('0X', '0x')]: {}, // uppercase hex
+      },
+      errors: {
+        '0x08c379a0': {},               // valid 4-byte selector
+        '0x08c3': {},                   // truncated selector
+        '0x08C379A0': {},               // uppercase hex
+        [topic]: {},                    // 32 bytes where 4 are required
+      },
+    })
+    expect(messages(issues)).toEqual([
+      expect.stringContaining('events key "0xddf252ad"'),
+      expect.stringContaining(`events key "${topic.toUpperCase().replace('0X', '0x')}"`),
+      expect.stringContaining('errors key "0x08c3"'),
+      expect.stringContaining('errors key "0x08C379A0"'),
+      expect.stringContaining(`errors key "${topic}"`),
+    ])
+  })
+
+  it('accepts $ in bare names and signatures for events and errors', () => {
+    const issues = semanticChecks({
+      events: { $Custom: {}, '$emit(address)': {} },
+      errors: { _$weird: {} },
+    })
+    expect(issues).toEqual([])
+  })
+
   it('checks includes via the injected existence callback', () => {
     const issues = semanticChecks(
       { includes: ['interface:erc20', 'interface:erc9999', 'https://x.test/m.json'] },

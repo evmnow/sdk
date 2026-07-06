@@ -1,8 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   createContractClient,
+  ChainIdMismatchError,
+  ContractClientConfigError,
   ContractMetadataNotFoundError,
   ContractNotVerifiedOnSourcifyError,
+  InvalidAddressError,
 } from '../src/index'
 import {
   encodeFacets,
@@ -40,7 +43,7 @@ describe('createContractClient', () => {
     const sourcifyResponse = {
       name: 'WETH9',
       abi: [{ type: 'function', name: 'deposit' }],
-      deployedBytecode: '0x6060604052',
+      runtimeBytecode: { onchainBytecode: '0x6060604052' },
       sources: {
         'contracts/WETH9.sol': { content: 'pragma solidity ^0.4.18;' },
       },
@@ -125,6 +128,12 @@ describe('createContractClient', () => {
 
     // Deployed bytecode (opt-in via include)
     expect(result.deployedBytecode).toBe('0x6060604052')
+
+    // include.deployedBytecode requests the valid Sourcify v2 selector
+    const sourcifyUrl = (fetchFn as any).mock.calls
+      .map((c: any) => c[0])
+      .find((url: string) => url.includes('sourcify.dev'))
+    expect(sourcifyUrl).toContain('fields=abi,userdoc,devdoc,sources,runtimeBytecode')
   })
 
   it('works with sourcify only', async () => {
@@ -332,6 +341,49 @@ describe('createContractClient', () => {
     })
 
     await expect(client.get('not-an-address')).rejects.toThrow('Invalid address or ENS name')
+    await expect(client.get('not-an-address')).rejects.toBeInstanceOf(InvalidAddressError)
+  })
+
+  // ── EIP-55 checksums ──────────────────────────────────────────────────
+
+  describe('EIP-55 checksum validation', () => {
+    const CHECKSUMMED = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' // WETH
+    // Same address with one letter's case flipped
+    const BROKEN = '0xc02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'
+
+    function sourcifyOnlyClient() {
+      return createContractClient({
+        chainId: 1,
+        fetch: createMockFetch([
+          {
+            match: url => url.includes('sourcify'),
+            response: {
+              status: 200,
+              body: { abi: [{ type: 'function', name: 'deposit' }], userdoc: { methods: {} }, devdoc: { methods: {} } },
+            },
+          },
+        ]),
+      })
+    }
+
+    it('accepts a correctly checksummed address and lowercases it', async () => {
+      const result = await sourcifyOnlyClient().get(CHECKSUMMED)
+      expect(result.address).toBe(WETH)
+    })
+
+    it('rejects a mixed-case address with a broken checksum', async () => {
+      await expect(sourcifyOnlyClient().get(BROKEN))
+        .rejects.toBeInstanceOf(InvalidAddressError)
+      await expect(sourcifyOnlyClient().get(BROKEN))
+        .rejects.toThrow('EIP-55')
+    })
+
+    it('accepts all-lowercase and all-uppercase addresses without a checksum', async () => {
+      expect((await sourcifyOnlyClient().get(WETH)).address).toBe(WETH)
+
+      const upper = '0x' + WETH.slice(2).toUpperCase()
+      expect((await sourcifyOnlyClient().get(upper)).address).toBe(WETH)
+    })
   })
 
   it('requires a mainnet RPC for ENS resolution on mainnet', async () => {
@@ -342,6 +394,18 @@ describe('createContractClient', () => {
     })
 
     await expect(client.get('vitalik.eth')).rejects.toThrow('ENS resolution requires a mainnet RPC')
+    await expect(client.get('vitalik.eth')).rejects.toBeInstanceOf(ContractClientConfigError)
+  })
+
+  it('routes mixed-case ENS names into ENS resolution (lowercased before the .eth check)', async () => {
+    const client = createContractClient({
+      chainId: 1,
+      fetch: vi.fn() as unknown as typeof fetch,
+      // no rpc, no ensRpc — hitting the ensRpc guard proves .eth routing
+    })
+
+    await expect(client.get('Vitalik.eth')).rejects.toThrow('ENS resolution requires a mainnet RPC')
+    await expect(client.get('VITALIK.ETH')).rejects.toThrow('ENS resolution requires a mainnet RPC')
   })
 
   it('requires ensRpc for ENS resolution on non-mainnet chains', async () => {
@@ -434,7 +498,145 @@ describe('createContractClient', () => {
     // fetchContractURI surfaces the mismatch directly. (Inside get(), the
     // contractURI and diamond paths swallow it into null via their .catch
     // handlers, which would surface as a generic NotFound instead.)
-    await expect(client.fetchContractURI(WETH)).rejects.toThrow('RPC chainId mismatch')
+    let error: unknown
+    try {
+      await client.fetchContractURI(WETH)
+    } catch (cause) {
+      error = cause
+    }
+    expect(error).toBeInstanceOf(ChainIdMismatchError)
+    expect((error as ChainIdMismatchError).message).toContain('RPC chainId mismatch')
+    expect((error as ChainIdMismatchError).expected).toBe(1)
+    expect((error as ChainIdMismatchError).actual).toBe(8453)
+  })
+
+  it('resolves ENS through a custom Universal Resolver address when configured', async () => {
+    const CUSTOM_RESOLVER = '0x' + 'dd'.repeat(20)
+    const fetchFn = createMockFetch([
+      {
+        match: (url, body) => url === 'https://rpc.test'
+          && body.includes('"method":"eth_call"')
+          && body.toLowerCase().includes(CUSTOM_RESOLVER),
+        response: {
+          status: 200,
+          body: {
+            jsonrpc: '2.0',
+            id: 1,
+            result: '0x'
+              + '0000000000000000000000000000000000000000000000000000000000000020'
+              + '0000000000000000000000000000000000000000000000000000000000000020'
+              + '000000000000000000000000' + 'c0'.repeat(20),
+          },
+        },
+      },
+    ])
+
+    const client = createContractClient({
+      chainId: 1,
+      rpc: 'https://rpc.test',
+      ensResolver: CUSTOM_RESOLVER,
+      fetch: fetchFn,
+    })
+
+    await client.get('vitalik.eth').catch(() => null)
+
+    const calls = (fetchFn as any).mock.calls
+    const customResolverCalls = calls.filter((c: any[]) => {
+      const body = typeof c[1]?.body === 'string' ? c[1].body : ''
+      return body.toLowerCase().includes(CUSTOM_RESOLVER)
+    })
+    const defaultResolverCalls = calls.filter((c: any[]) => {
+      const body = typeof c[1]?.body === 'string' ? c[1].body : ''
+      return body.toLowerCase().includes('0xce01f8eee7e479c928f8919abd53e553a36cef67')
+    })
+    expect(customResolverCalls.length).toBeGreaterThan(0)
+    expect(defaultResolverCalls.length).toBe(0)
+  })
+
+  // ── Per-client caching ────────────────────────────────────────────────
+
+  describe('caching', () => {
+    function countingClient(cache?: boolean) {
+      const fetchFn = createMockFetch([
+        {
+          match: url => url.includes('contract-metadata'),
+          response: { status: 200, body: { name: 'Cached Contract' } },
+        },
+        {
+          match: url => url.includes('sourcify'),
+          response: {
+            status: 200,
+            body: { abi: [{ type: 'function', name: 'deposit' }], userdoc: { methods: {} }, devdoc: { methods: {} } },
+          },
+        },
+      ])
+      const client = createContractClient({
+        chainId: 1,
+        fetch: fetchFn,
+        ...(cache === undefined ? {} : { cache }),
+      })
+      const countCalls = (needle: string) =>
+        (fetchFn as any).mock.calls.filter((c: any) => String(c[0]).includes(needle)).length
+      return { client, countCalls }
+    }
+
+    it('memoizes repository and Sourcify fetches across get() calls', async () => {
+      const { client, countCalls } = countingClient()
+
+      const first = await client.get(WETH)
+      const second = await client.get(WETH)
+
+      expect(first.metadata.name).toBe('Cached Contract')
+      expect(second.metadata.name).toBe('Cached Contract')
+      expect(countCalls('sourcify')).toBe(1)
+      expect(countCalls('contract-metadata')).toBe(1)
+    })
+
+    it('deduplicates concurrent in-flight fetches', async () => {
+      const { client, countCalls } = countingClient()
+
+      await Promise.all([client.get(WETH), client.get(WETH)])
+
+      expect(countCalls('sourcify')).toBe(1)
+      expect(countCalls('contract-metadata')).toBe(1)
+    })
+
+    it('can be disabled with cache: false', async () => {
+      const { client, countCalls } = countingClient(false)
+
+      await client.get(WETH)
+      await client.get(WETH)
+
+      expect(countCalls('sourcify')).toBe(2)
+      expect(countCalls('contract-metadata')).toBe(2)
+    })
+  })
+
+  it('resolves includes against a configurable schemaBaseUrl', async () => {
+    const fetchFn = createMockFetch([
+      {
+        match: url => url.includes('contract-metadata') && url.includes(WETH),
+        response: { status: 200, body: { includes: ['erc20'], name: 'My Token' } },
+      },
+      {
+        match: url => url === 'https://schema.test/interfaces/erc20.json',
+        response: {
+          status: 200,
+          body: { actions: { transfer: { function: 'transfer', title: 'From Interface' } } },
+        },
+      },
+    ])
+
+    const client = createContractClient({
+      chainId: 1,
+      fetch: fetchFn,
+      schemaBaseUrl: 'https://schema.test/',
+      sources: { sourcify: false, contractURI: false },
+    })
+
+    const result = await client.get(WETH)
+    expect(result.metadata.name).toBe('My Token')
+    expect(result.metadata.actions?.transfer?.title).toBe('From Interface')
   })
 
   it('does not request sources/bytecode from Sourcify by default', async () => {

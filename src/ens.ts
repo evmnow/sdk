@@ -2,12 +2,20 @@ import { keccak_256 } from '@noble/hashes/sha3'
 
 const encoder = new TextEncoder()
 
+/**
+ * Case-normalize an ENS name (ASCII lowercase). Full ENSIP-15 normalization
+ * of non-ASCII names is not performed — see the README's ENS limitations.
+ */
+export function normalizeEnsName(name: string): string {
+  return name.toLowerCase()
+}
+
 export function namehash(name: string): string {
   let node = new Uint8Array(32) // 0x00..00
 
   if (name === '') return toHex(node)
 
-  const labels = name.split('.')
+  const labels = normalizeEnsName(name).split('.')
   const combined = new Uint8Array(64)
   for (let i = labels.length - 1; i >= 0; i--) {
     combined.set(node, 0)
@@ -19,7 +27,7 @@ export function namehash(name: string): string {
 }
 
 export function dnsEncode(name: string): string {
-  const labels = name.split('.')
+  const labels = normalizeEnsName(name).split('.')
   let hex = ''
 
   for (const label of labels) {

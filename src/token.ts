@@ -42,22 +42,19 @@ export function createTokenInfoResolver(config: TokenInfoResolverConfig): TokenI
   const inflight = new Map<string, Promise<TokenInfo | null>>()
 
   async function lookup(address: string): Promise<TokenInfo | null> {
-    let decimalsHex: string
-    try {
-      decimalsHex = await ethCall(rpc, address, DECIMALS_SELECTOR, fetchFn)
-    } catch {
-      return null
-    }
+    // Both reads are independent — issue them concurrently. symbol() is
+    // optional (decimals alone still formats correctly), so its failure is
+    // swallowed; a failed decimals() read makes the token unresolvable.
+    const [decimalsHex, symbolHex] = await Promise.all([
+      ethCall(rpc, address, DECIMALS_SELECTOR, fetchFn).catch(() => null),
+      ethCall(rpc, address, SYMBOL_SELECTOR, fetchFn).catch(() => null),
+    ])
+
+    if (decimalsHex === null) return null
     const decimals = decodeDecimals(decimalsHex)
     if (decimals === null) return null
 
-    let symbol: string | undefined
-    try {
-      const symbolHex = await ethCall(rpc, address, SYMBOL_SELECTOR, fetchFn)
-      symbol = decodeSymbol(symbolHex) ?? undefined
-    } catch {
-      // symbol is optional — decimals alone still formats correctly
-    }
+    const symbol = symbolHex === null ? undefined : decodeSymbol(symbolHex) ?? undefined
 
     return symbol === undefined ? { decimals } : { decimals, symbol }
   }
@@ -114,14 +111,18 @@ function decodeDecimals(hex: string): number | null {
 }
 
 /**
- * Decode a `symbol()` return — a dynamic ABI string, or a fixed bytes32 word
- * for legacy tokens (MKR, SAI).
+ * Decode a `symbol()`-style string return — a dynamic ABI string, or a fixed
+ * bytes32 word for legacy tokens (MKR, SAI). Also fits `name()` — pass a
+ * larger `maxLength`. Output is sanitized via {@link sanitizeSymbol}.
  */
-function decodeSymbol(hex: string): string | null {
+export function decodeSymbol(
+  hex: string,
+  maxLength: number = MAX_SYMBOL_LENGTH,
+): string | null {
   if (!hex || hex === '0x') return null
 
   const dynamic = decodeAbiString(hex)
-  if (dynamic) return sanitizeSymbol(dynamic)
+  if (dynamic) return sanitizeSymbol(dynamic, maxLength)
 
   const h = hex.startsWith('0x') ? hex.slice(2) : hex
   if (h.length === 64) {
@@ -132,15 +133,22 @@ function decodeSymbol(hex: string): string | null {
       bytes.push(byte)
     }
     if (bytes.length) {
-      return sanitizeSymbol(new TextDecoder().decode(new Uint8Array(bytes)))
+      return sanitizeSymbol(new TextDecoder().decode(new Uint8Array(bytes)), maxLength)
     }
   }
 
   return null
 }
 
-function sanitizeSymbol(raw: string): string | null {
+/**
+ * Make an on-chain string display-safe: strip control characters, trim, and
+ * cap the length. Returns null when nothing displayable remains.
+ */
+export function sanitizeSymbol(
+  raw: string,
+  maxLength: number = MAX_SYMBOL_LENGTH,
+): string | null {
   const cleaned = raw.replace(/[\u0000-\u001f\u007f]/g, '').trim()
   if (!cleaned) return null
-  return cleaned.slice(0, MAX_SYMBOL_LENGTH)
+  return cleaned.slice(0, maxLength)
 }

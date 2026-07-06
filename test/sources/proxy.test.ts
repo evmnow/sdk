@@ -56,8 +56,82 @@ describe('enrichTargets (Sourcify-bound)', () => {
     expect(sourcifyFetch).toHaveBeenCalledTimes(2)
     expect(targets[0].abi).toHaveLength(1)
     expect(targets[0].natspec?.userdoc).toBeTruthy()
-    expect(sourcifyResults[0]).toBe(src)
+    // Facet results are selector-filtered copies (everything here is mounted)
+    expect(sourcifyResults[0]).toEqual(src)
     expect(sourcifyResults[1]).toBeNull()
+  })
+
+  it('filters facet actions and natspec methods to mounted selectors', async () => {
+    // The facet declares transfer + approve, but the diamond only mounts
+    // transfer (0xa9059cbb). approve must not leak into actions or natspec.
+    const src: SourcifyResult = {
+      abi: [
+        { type: 'function', name: 'transfer', inputs: [{ type: 'address' }, { type: 'uint256' }] },
+        { type: 'function', name: 'approve', inputs: [{ type: 'address' }, { type: 'uint256' }] },
+        { type: 'event', name: 'Transfer', inputs: [] },
+      ],
+      userdoc: {
+        methods: {
+          'transfer(address,uint256)': { notice: 'moves' },
+          'approve(address,uint256)': { notice: 'approves' },
+        },
+      },
+      devdoc: {
+        methods: {
+          'approve(address,uint256)': { details: 'internal' },
+        },
+      },
+      actions: {
+        transfer: { function: 'transfer', description: 'moves' },
+        approve: { function: 'approve', description: 'approves' },
+      },
+    }
+    const sourcifyFetch = vi.fn(async () => src)
+
+    const { targets, sourcifyResults } = await enrichTargets(
+      [{ address: '0x' + 'aa'.repeat(20), selectors: ['0xa9059cbb'] }],
+      sourcifyFetch,
+    )
+
+    const filtered = sourcifyResults[0]!
+    expect(Object.keys(filtered.actions!)).toEqual(['transfer'])
+    expect(Object.keys((filtered.userdoc as any).methods)).toEqual(['transfer(address,uint256)'])
+    expect(Object.keys((filtered.devdoc as any).methods)).toEqual([])
+    // Target natspec is the filtered doc too
+    expect(Object.keys((targets[0].natspec!.userdoc as any).methods))
+      .toEqual(['transfer(address,uint256)'])
+
+    // The composed metadata layer can no longer inject the unmounted action
+    const out = composeProxyResolution(targets, sourcifyResults)
+    expect(Object.keys(out.metadataLayer!.actions!)).toEqual(['transfer'])
+  })
+
+  it('filters signature-form action refs by mounted selector', async () => {
+    const src: SourcifyResult = {
+      actions: {
+        'transfer(address,uint256)': { function: 'transfer(address,uint256)' },
+        'approve(address,uint256)': { function: 'approve(address,uint256)' },
+      },
+    }
+    const sourcifyFetch = vi.fn(async () => src)
+
+    const { sourcifyResults } = await enrichTargets(
+      [{ address: '0x' + 'aa'.repeat(20), selectors: ['0xa9059cbb'] }],
+      sourcifyFetch,
+    )
+
+    expect(Object.keys(sourcifyResults[0]!.actions!)).toEqual(['transfer(address,uint256)'])
+  })
+
+  it('does not filter single-impl targets (no selectors)', async () => {
+    const src: SourcifyResult = {
+      abi: [{ type: 'function', name: 'anything', inputs: [] }],
+      actions: { anything: { function: 'anything' } },
+    }
+    const sourcifyFetch = vi.fn(async () => src)
+
+    const { sourcifyResults } = await enrichTargets([singleImplTarget], sourcifyFetch)
+    expect(sourcifyResults[0]).toBe(src)
   })
 
   it('passes full ABI through for single-impl targets (no selector filter)', async () => {
@@ -123,6 +197,27 @@ describe('composeProxyResolution (metadataLayer)', () => {
     expect(out.metadataLayer).toBeUndefined()
     expect(out.compositeAbi).toBeUndefined()
     expect(out.natspec).toBeUndefined()
+  })
+
+  it('metadataLayer is first-target-wins, consistent with the natspec merge', () => {
+    const targets = [
+      {
+        address: '0x' + 'aa'.repeat(20),
+        natspec: { userdoc: { methods: { 'f()': { notice: 'from A' } } } },
+      },
+      {
+        address: '0x' + 'bb'.repeat(20),
+        natspec: { userdoc: { methods: { 'f()': { notice: 'from B' } } } },
+      },
+    ]
+    const sourcifyResults: SourcifyResult[] = [
+      { actions: { f: { function: 'f', description: 'from A' } } },
+      { actions: { f: { function: 'f', description: 'from B' } } },
+    ]
+
+    const out = composeProxyResolution(targets, sourcifyResults)
+    expect(out.metadataLayer?.actions?.f?.description).toBe('from A')
+    expect((out.natspec?.userdoc as any).methods['f()'].notice).toBe('from A')
   })
 })
 

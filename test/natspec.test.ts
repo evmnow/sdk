@@ -58,4 +58,14 @@ describe('mergeNatspecDocs', () => {
     )
     expect(merged).toEqual({ notice: 'real' })
   })
+
+  it('is immune to prototype pollution via __proto__/constructor/prototype keys', () => {
+    const hostile = JSON.parse('{"__proto__":{"polluted":"yes"},"constructor":{"x":1},"prototype":{"y":2},"notice":"ok"}')
+
+    const merged = mergeNatspecDocs(hostile)
+
+    expect(merged).toEqual({ notice: 'ok' })
+    expect(Object.getPrototypeOf(merged!)).toBe(Object.prototype)
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+  })
 })

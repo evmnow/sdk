@@ -281,12 +281,28 @@ export interface ContractClientConfig {
    * when `chainId === 1`.
    */
   ensRpc?: string
+  /**
+   * Address of the ENS Universal Resolver used for `.eth` lookups.
+   * Default: the canonical mainnet deployment.
+   */
+  ensResolver?: string
   repositoryUrl?: string
   sourcifyUrl?: string
+  /**
+   * Base URL that `includes` interface references resolve against
+   * (`{schemaBaseUrl}/interfaces/{name}.json`). Must be https.
+   * Default: `https://evmnow.github.io/contract-metadata/v1`.
+   */
+  schemaBaseUrl?: string
   ipfsGateway?: string
   fetch?: typeof globalThis.fetch
   sources?: SourceConfig
   include?: IncludeFields
+  /**
+   * Memoize repository and Sourcify lookups (including in-flight
+   * deduplication) for the lifetime of the client. Default: true.
+   */
+  cache?: boolean
 }
 
 export interface GetOptions {
@@ -299,11 +315,25 @@ export interface GetOptions {
 /** A token standard detectable from the ABI alone. */
 export type StandardInterface = 'erc20' | 'erc721'
 
+/**
+ * A single entry of a contract ABI (function, event, error, constructor, …).
+ * Kept structural — the SDK does not validate ABI items beyond what each
+ * operation needs; use your ABI tooling's types for strict decoding.
+ */
+export interface AbiItem {
+  type: string
+  name?: string
+  inputs?: readonly unknown[]
+  outputs?: readonly unknown[]
+  stateMutability?: string
+  anonymous?: boolean
+}
+
 export interface ContractResult {
   chainId: number
   address: string
   metadata: ContractMetadataDocument
-  abi?: unknown[]
+  abi?: AbiItem[]
   natspec?: NatSpec
   sources?: Record<string, string>
   deployedBytecode?: string
@@ -324,7 +354,8 @@ export interface TargetInfo {
   address: string
   /** Defined for diamond facets; undefined for single-impl proxies (all selectors). */
   selectors?: string[]
-  abi?: unknown[]
+  /** Filtered to mounted selectors for diamond facets. */
+  abi?: AbiItem[]
   natspec?: NatSpec
   sources?: Record<string, string>
 }
@@ -339,10 +370,10 @@ export interface ProxyResolution {
   /** Proxy admin address (for `eip-1967` / `zeppelinos` when the admin slot is set). */
   admin?: string
   /** Composite ABI built from target ABIs (first-wins dedup by selector). */
-  compositeAbi?: unknown[]
+  compositeAbi?: AbiItem[]
   /** Merged NatSpec across targets (first-target-wins per key). */
   natspec?: NatSpec
-  /** Metadata layer (functions/events/errors) distilled from target NatSpec, ready to merge. */
+  /** Metadata layer (actions/events/errors) distilled from target NatSpec, first-target-wins per key. */
   metadataLayer?: Partial<ContractMetadataDocument>
 }
 
@@ -364,7 +395,7 @@ export interface ContractClient {
 }
 
 export interface SourcifyResult {
-  abi?: unknown[]
+  abi?: AbiItem[]
   userdoc?: Record<string, unknown>
   devdoc?: Record<string, unknown>
   sources?: Record<string, string>

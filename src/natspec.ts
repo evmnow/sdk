@@ -1,4 +1,4 @@
-import { isRecord } from './merge'
+import { isRecord, isUnsafeKey } from './merge'
 
 type NatSpecDoc = Record<string, unknown>
 
@@ -29,7 +29,7 @@ export function mergeNatspecDocs(
 
   for (const doc of present) {
     for (const [key, value] of Object.entries(doc)) {
-      if (value === undefined) continue
+      if (value === undefined || isUnsafeKey(key)) continue
       if (RECORD_KEYS.has(key) && isRecord(value)) {
         const existing = isRecord(merged[key]) ? (merged[key] as Record<string, unknown>) : {}
         merged[key] = { ...value, ...existing }

@@ -76,6 +76,44 @@ export class ContractNotVerifiedOnSourcifyError extends ContractMetadataNotFound
   }
 }
 
+/** The input is not a valid EVM address (or fails its EIP-55 checksum). */
+export class InvalidAddressError extends ContractMetadataError {
+  /** The rejected input, verbatim. */
+  input: string
+
+  constructor(input: string, message?: string, options?: ErrorOptions) {
+    super(message ?? `Invalid address or ENS name: ${input}`, options)
+    this.name = 'InvalidAddressError'
+    this.input = input
+  }
+}
+
+/** The configured RPC endpoint reports a different chain than `config.chainId`. */
+export class ChainIdMismatchError extends ContractMetadataError {
+  /** The chainId the client was configured with. */
+  expected: number
+  /** The chainId the RPC's `eth_chainId` actually returned. */
+  actual: number
+
+  constructor(expected: number, actual: number, options?: ErrorOptions) {
+    super(
+      `RPC chainId mismatch: config.chainId=${expected} but rpc returned ${actual}`,
+      options,
+    )
+    this.name = 'ChainIdMismatchError'
+    this.expected = expected
+    this.actual = actual
+  }
+}
+
+/** The client configuration is missing something an operation requires (e.g. `ensRpc`). */
+export class ContractClientConfigError extends ContractMetadataError {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options)
+    this.name = 'ContractClientConfigError'
+  }
+}
+
 export class ENSResolutionError extends ContractMetadataError {
   ensName: string
 
