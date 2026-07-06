@@ -1,6 +1,6 @@
 {
   "name": "@evmnow/sdk",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Resolve complete contract metadata for any EVM contract — curated repository, ERC-7572 contractURI, Sourcify + NatSpec, and proxy/diamond resolution — merged into a single document.",
   "license": "MIT",
   "repository": {
